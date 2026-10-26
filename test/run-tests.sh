@@ -135,6 +135,7 @@ attach() {  # attach [signal]: run fork-attach, send it the signal, list the cal
     kill -"$1" "$pid"
   fi
   wait "$pid" 2>/dev/null
+  sleep 0.5  # the cleanup runs detached
   tr '\n' ';' < "$CLAUDE_LOG"
 }
 check "pane close stops fork" "$(attach HUP)" "attach abcd1234;stop abcd1234;"

@@ -10,12 +10,19 @@ id=$1
 claude=${HERDR_FORKS_CLAUDE:-claude}
 on_close=${HERDR_FORKS_ON_CLOSE:-stop}
 
+# Herdr kills what is left in a closed pane about a second after the hang-up, so the
+# cleanup runs detached in its own session (perl setsid) and this script exits at once.
 closed() {
   trap '' HUP TERM INT
+  local c i
+  c=$(printf %q "$claude"); i=$(printf %q "$id")
   case $on_close in
-    stop) "$claude" stop "$id" ;;
-    remove) "$claude" stop "$id"; "$claude" rm "$id" ;;
-  esac </dev/null >/dev/null 2>&1
+    stop) set -- "$c stop $i" ;;
+    remove) set -- "$c stop $i; $c rm $i" ;;
+    *) exit 0 ;;
+  esac
+  perl -e 'use POSIX qw(setsid); fork and exit; setsid; exec @ARGV' bash -c "$1" \
+    </dev/null >/dev/null 2>&1
   exit 0
 }
 trap closed HUP TERM
