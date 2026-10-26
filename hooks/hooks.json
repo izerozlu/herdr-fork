@@ -23,7 +23,7 @@
           },
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/scripts/fork-tab",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/scripts/fork-open",
             "timeout": 10
           }
         ]

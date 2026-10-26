@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# SessionStart hook. Claude Code's /fork starts the fork as a background session; its
+# job folder ($CLAUDE_JOB_DIR) holds parent-transcript.jsonl, which a plain --bg
+# session does not have. Inside Herdr, open the fork next to the pane it was forked
+# from, running `claude attach <id>`, so it can be watched and prompted there.
+#
+# Where it opens: HERDR_FORKS_LAYOUT, else the plugin's `layout` option, else right.
+#   right, left, down, up  split the forking pane on that side
+#   tab                    new tab in the forking workspace
+#   workspace              new workspace
+# Never fails the session: Herdr errors only print a note.
+set -uo pipefail
+input=$(cat)
+[ -n "${HERDR_WORKSPACE_ID:-}" ] || exit 0
+[ -n "${CLAUDE_JOB_DIR:-}" ] && [ -f "$CLAUDE_JOB_DIR/parent-transcript.jsonl" ] || exit 0
+session=$(jq -r '.session_id // empty' <<<"$input")
+cwd=$(jq -r '.cwd // empty' <<<"$input")
+[ -n "$session" ] || exit 0
+short=${session:0:8}
+cwd=${cwd:-$PWD}
+herdr=${HERDR_BIN_PATH:-herdr}
+
+layout=${HERDR_FORKS_LAYOUT:-${CLAUDE_PLUGIN_OPTION_LAYOUT:-right}}
+case $layout in
+  right|left|down|up|tab|workspace) ;;
+  *) echo "herdr-forks: layout $layout is not right, left, down, up, tab or workspace; using right" >&2; layout=right ;;
+esac
+# A split needs the forking pane; without it, fall back to a tab.
+if [ -z "${HERDR_PANE_ID:-}" ]; then
+  case $layout in right|left|down|up) layout=tab ;; esac
+fi
+
+# Herdr splits only right or down; left and up split, then swap the two panes.
+case $layout in
+  right|left) direction=right ;;
+  down|up) direction=down ;;
+esac
+case $layout in
+  tab)
+    created=$("$herdr" tab create --workspace "$HERDR_WORKSPACE_ID" --cwd "$cwd" --label "fork $short" --focus 2>&1); rc=$?
+    query=.result.root_pane.pane_id ;;
+  workspace)
+    created=$("$herdr" workspace create --cwd "$cwd" --label "fork $short" --focus 2>&1); rc=$?
+    query=.result.root_pane.pane_id ;;
+  *)
+    created=$("$herdr" pane split "$HERDR_PANE_ID" --direction "$direction" --cwd "$cwd" --focus 2>&1); rc=$?
+    query=.result.pane.pane_id ;;
+esac
+if [ "$rc" -ne 0 ]; then
+  echo "herdr-forks: could not open a $layout pane for fork $short: $created" >&2
+  exit 0
+fi
+pane=$(jq -r "$query // empty" <<<"$created" 2>/dev/null)
+if [ -n "$pane" ] && { [ "$layout" = left ] || [ "$layout" = up ]; }; then
+  "$herdr" pane swap --source-pane "$pane" --target-pane "$HERDR_PANE_ID" >/dev/null 2>&1 \
+    || echo "herdr-forks: fork $short opened $direction instead of $layout (the swap failed)" >&2
+fi
+if [ -z "$pane" ] || ! "$herdr" pane run "$pane" "claude attach $short" >/dev/null 2>&1; then
+  echo "herdr-forks: opened a pane for fork $short but could not attach; run: claude attach $short" >&2
+fi
+exit 0
