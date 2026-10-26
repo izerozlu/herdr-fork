@@ -18,14 +18,21 @@ The plugin's tab handling was inspired by [herdr-lock](https://github.com/aalvar
 - Claude Code with plugin support, run inside a Herdr pane
 - `jq`
 
-## Install (local checkout)
+## Install
 
 ```bash
-claude plugin marketplace add ~/Projects/hobby/herdr-fork
+claude plugin marketplace add izerozlu/herdr-fork
 claude plugin install herdr-fork@herdr-fork
 ```
 
 Start a new Claude session after you install it. Hooks load when a session starts.
+
+To update:
+
+```bash
+claude plugin marketplace update herdr-fork
+claude plugin update herdr-fork@herdr-fork
+```
 
 ## Use
 
