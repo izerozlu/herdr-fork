@@ -105,6 +105,7 @@ case "$1 $2" in
   "tab create") [ -n "${HERDR_FAIL:-}" ] && exit 1; echo '{"result":{"root_pane":{"pane_id":"w1:p9"},"tab":{"tab_id":"w1:t9"}}}' ;;
   "pane split") [ -n "${HERDR_FAIL:-}" ] && exit 1; echo '{"result":{"pane":{"pane_id":"w1:p7"}}}' ;;
   "workspace create") echo '{"result":{"root_pane":{"pane_id":"w2:p1"},"workspace":{"workspace_id":"w2"}}}' ;;
+  "agent list") echo '{"result":{"agents":[{"agent_session":{"value":"other-sid"},"workspace_id":"w5","pane_id":"w5:p1"},{"agent_session":{"value":"parent-sid"},"workspace_id":"w3","pane_id":"w3:p4"}]}}' ;;
 esac
 H
 chmod +x "$tmp/herdr"
@@ -152,6 +153,17 @@ check "no pane id falls back to tab" "$(sed -n 1p "$HERDR_LOG")" "tab create --w
 out=$(LAYOUT=sideways tabhook)
 has "bad layout warns" "$out" "is not right, left, down, up, tab or workspace"
 check "bad layout uses right" "$(sed -n 1p "$HERDR_LOG")" "pane split w1:p1 --direction right --cwd /work/proj --focus"
+echo '{"forkParentSessionId":"parent-sid"}' > "$job/state.json"
+tabhook >/dev/null
+check "fork finds forking pane" "$(sed -n 2p "$HERDR_LOG")" "pane split w3:p4 --direction right --cwd /work/proj --focus"
+LAYOUT=tab tabhook >/dev/null
+check "fork finds forking workspace" "$(sed -n 2p "$HERDR_LOG")" "tab create --workspace w3 --cwd /work/proj --label fork abcd1234 --focus"
+PANE= tabhook >/dev/null
+check "found pane beats missing env" "$(sed -n 2p "$HERDR_LOG")" "pane split w3:p4 --direction right --cwd /work/proj --focus"
+echo '{"forkParentSessionId":"gone-sid"}' > "$job/state.json"
+tabhook >/dev/null
+check "unknown parent keeps env pane" "$(sed -n 2p "$HERDR_LOG")" "pane split w1:p1 --direction right --cwd /work/proj --focus"
+rm "$job/state.json"
 WS= tabhook >/dev/null
 check "no tab outside Herdr" "$(cat "$HERDR_LOG")" ""
 out=$(HERDR_FAIL=1 tabhook); code=$?

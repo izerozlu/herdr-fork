@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # SessionStart hook. Claude Code's /fork starts the fork as a background session; its
 # job folder ($CLAUDE_JOB_DIR) holds parent-transcript.jsonl, which a plain --bg
-# session does not have. Inside Herdr, open the fork next to the pane it was forked
-# from, running `claude attach <id>`, so it can be watched and prompted there.
+# session does not have, and state.json names the forking session. Inside Herdr,
+# open the fork next to the pane it was forked from, running `claude attach <id>`,
+# so it can be watched and prompted there.
 #
 # Where it opens: HERDR_FORK_LAYOUT, else the plugin's `layout` option, else right.
 #   right, left, down, up  split the forking pane on that side
@@ -22,6 +23,19 @@ short=${session:0:8}
 cwd=${cwd:-$PWD}
 herdr=${HERDR_BIN_PATH:-herdr}
 root=$(cd "$(dirname "$0")/.." && pwd)
+
+# /fork can hand the fork to a spare session that started earlier, so its
+# HERDR_PANE_ID and HERDR_WORKSPACE_ID can belong to another (or a closed) pane.
+# Find the forking session's pane through Herdr; keep the env values otherwise.
+parent=$(jq -r '.forkParentSessionId // empty' "$CLAUDE_JOB_DIR/state.json" 2>/dev/null)
+if [ -n "$parent" ]; then
+  found=$("$herdr" agent list 2>/dev/null | jq -r --arg s "$parent" \
+    'first(.result.agents[] | select(.agent_session.value == $s) | "\(.workspace_id) \(.pane_id)") // empty' 2>/dev/null)
+  if [ -n "$found" ]; then
+    HERDR_WORKSPACE_ID=${found% *}
+    HERDR_PANE_ID=${found#* }
+  fi
+fi
 
 layout=${HERDR_FORK_LAYOUT:-${CLAUDE_PLUGIN_OPTION_LAYOUT:-right}}
 case $layout in
