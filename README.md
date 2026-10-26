@@ -1,6 +1,6 @@
 # herdr-fork
 
-A Claude Code plugin for [Herdr](https://herdr.dev). It opens forks of a Claude session in their own Herdr tab. A fork is a new agent that starts with a copy of the whole conversation so far.
+A Claude Code plugin for [Herdr](https://herdr.dev). Type `/fork`, and the fork opens in a new Herdr pane, tab or workspace. A fork is a new agent that starts with a copy of the whole conversation so far.
 
 The plugin's tab handling was inspired by [herdr-lock](https://github.com/aalvarezdeliveryhub/herdr-lock). Kudos to [aalvarezdeliveryhub](https://github.com/aalvarezdeliveryhub) for the inspiration.
 
