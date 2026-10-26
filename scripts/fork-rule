@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# SessionStart hook: inside Herdr, add the fork rule to the session.
+set -euo pipefail
+cat >/dev/null
+[ -n "${HERDR_WORKSPACE_ID:-}" ] || exit 0
+root=$(cd "$(dirname "$0")/.." && pwd)
+jq -n --rawfile rule "$root/scripts/fork-rule.md" \
+  '{hookSpecificOutput: {hookEventName: "SessionStart", additionalContext: $rule}}'

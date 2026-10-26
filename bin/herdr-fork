@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+# herdr-fork [-a "extra claude args"] [-C subdir] <name> <task...>
+#   Fork the calling Claude session into a new tab of its Herdr workspace. The fork
+#   starts with a copy of the whole conversation so far (claude --resume <id>
+#   --fork-session), then gets <task>. The tab is opened by herdr-lock's
+#   herdr-worker, so the same workspace and folder rules apply.
+#
+# Exit status: as herdr-worker (0 ok, 1 Herdr error, 2 refused, 3 blocked at
+# startup), plus 2 when this is not a Claude session or herdr-worker is missing.
+set -euo pipefail
+
+extra="--permission-mode auto"
+sub=""
+while getopts "a:C:" opt; do
+  case $opt in
+    a) extra=$OPTARG ;;
+    C) sub=$OPTARG ;;
+    *) exit 2 ;;
+  esac
+done
+shift $((OPTIND - 1))
+if [ $# -lt 2 ]; then
+  echo "usage: herdr-fork [-a \"claude args\"] [-C subdir] <name> <task...>" >&2
+  exit 2
+fi
+name=$1; shift
+task="$*"
+
+session=${CLAUDE_CODE_SESSION_ID:-}
+if [ -z "$session" ]; then
+  echo "herdr-fork: CLAUDE_CODE_SESSION_ID is not set; run herdr-fork from a Claude Code session's shell" >&2
+  exit 2
+fi
+worker=${HERDR_WORKER:-$(command -v herdr-worker || true)}
+if [ -z "$worker" ]; then
+  echo "herdr-fork: herdr-worker not found; install the herdr-lock plugin (claude plugin install herdr-lock@herdr-lock)" >&2
+  exit 2
+fi
+
+# Claude Code keeps each session at ~/.claude/projects/<folder>/<id>.jsonl.
+# --resume finds it from any folder, so a fork in -C <subdir> works as well.
+projects=${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects
+if [ -z "$(find "$projects" -maxdepth 2 -name "$session.jsonl" -print -quit 2>/dev/null)" ]; then
+  echo "herdr-fork: no transcript for session $session under $projects" >&2
+  exit 2
+fi
+if [ -n "$sub" ] && [ ! -d "$sub" ]; then
+  echo "herdr-fork: -C folder not found" >&2
+  exit 2
+fi
+
+task="You are a fork of the conversation above, running in your own Herdr tab named $name. The session you were forked from keeps working on its own; do not repeat its work. Your task:
+
+$task"
+
+args=(-a "$extra --resume $session --fork-session")
+[ -n "$sub" ] && args+=(-C "$sub")
+exec "$worker" "${args[@]}" "$name" "$task"

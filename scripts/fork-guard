@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# PreToolUse hook for the Agent tool. Inside Herdr, a fork subagent
+# (subagent_type "fork") is denied and Claude is told to use herdr-fork, so the fork
+# opens in its own tab. Other agent types and sessions outside Herdr are left alone.
+set -euo pipefail
+input=$(cat)
+[ -n "${HERDR_WORKSPACE_ID:-}" ] || exit 0
+[ "$(jq -r '.tool_input.subagent_type // empty' <<<"$input")" = fork ] || exit 0
+jq -n '{hookSpecificOutput: {
+  hookEventName: "PreToolUse",
+  permissionDecision: "deny",
+  permissionDecisionReason: "herdr-forks: forks open in their own Herdr tab. Run `herdr-fork <name> \"<task>\"` in Bash instead (add -C <subdir> for a folder inside this one). The fork gets a copy of this conversation and writes its report to /tmp/herd/<name>.md."
+}}'
