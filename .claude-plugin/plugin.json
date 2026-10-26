@@ -1,7 +1,7 @@
 {
   "name": "herdr-forks",
   "displayName": "Herdr Forks",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Forks of a Claude session open in their own Herdr tab: herdr-fork starts a copy of the current conversation in a new tab of the session's workspace, and a hook sends built-in fork subagents there instead.",
   "keywords": ["herdr", "fork", "agents", "workers"],
   "license": "MIT"

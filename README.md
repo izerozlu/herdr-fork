@@ -9,7 +9,7 @@ It builds on [herdr-lock](https://github.com/aalvarezdeliveryhub/herdr-lock): `h
 | Part | What it does |
 |---|---|
 | `herdr-fork` command | Starts `claude --resume <this session> --fork-session` in a new tab of this workspace (through `herdr-worker`), then sends it the task. |
-| Fork tab (SessionStart hook) | When you type `/fork` inside Herdr, Claude Code starts the fork as a background session. The hook opens a new tab in the same workspace that runs `claude attach <id>`, so you can see the fork and type to it there. |
+| Fork tab (SessionStart hook) | When you type `/fork` inside Herdr, Claude Code starts the fork as a background session. The hook splits the pane where you typed `/fork` and runs `claude attach <id>` in the new pane, so you can see the fork and type to it there. |
 | Guard (PreToolUse hook on the Agent tool) | Inside Herdr, blocks the built-in fork subagent (`subagent_type: "fork"`) and tells Claude to use `herdr-fork`. Other agent types are not changed. |
 | Fork rule (SessionStart hook) | Inside Herdr, tells Claude to fork with `herdr-fork`. |
 
@@ -30,7 +30,15 @@ Start a new Claude session after you install it. Hooks load when a session start
 
 ## Use
 
-Type `/fork` in a Claude session inside Herdr. A new tab named `fork <id>` opens and shows the fork. Type the fork's first prompt there.
+Type `/fork` in a Claude session inside Herdr. A new pane opens to the right and shows the fork. Type the fork's first prompt there.
+
+To change where the fork opens, set `HERDR_FORKS_LAYOUT` in the `env` block of `~/.claude/settings.json`:
+
+| Value | Where the fork opens |
+|---|---|
+| `right` (default) | New pane to the right of the session |
+| `down` | New pane below the session |
+| `tab` | New tab in the same workspace |
 
 Claude can also fork itself with the `herdr-fork` command:
 
