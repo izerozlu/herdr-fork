@@ -1,4 +1,4 @@
-# herdr-forks
+# herdr-fork
 
 A Claude Code plugin for [Herdr](https://herdr.dev). It opens forks of a Claude session in their own Herdr tab. A fork is a new agent that starts with a copy of the whole conversation so far.
 
@@ -22,8 +22,8 @@ It builds on [herdr-lock](https://github.com/aalvarezdeliveryhub/herdr-lock): `h
 ## Install (local checkout)
 
 ```bash
-claude plugin marketplace add ~/Projects/hobby/herdr-forks
-claude plugin install herdr-forks@herdr-forks
+claude plugin marketplace add ~/Projects/hobby/herdr-fork
+claude plugin install herdr-fork@herdr-fork
 ```
 
 Start a new Claude session after you install it. Hooks load when a session starts.
@@ -32,7 +32,7 @@ Start a new Claude session after you install it. Hooks load when a session start
 
 Type `/fork` in a Claude session inside Herdr. A new pane opens to the right and shows the fork. Type the fork's first prompt there.
 
-To change where the fork opens, set the plugin's **Fork destination** option (`/plugin` → herdr-forks → configure). The environment variable `HERDR_FORKS_LAYOUT` wins over the option, if you set it (for example in the `env` block of `~/.claude/settings.json`).
+To change where the fork opens, set the plugin's **Fork destination** option (`/plugin` → herdr-fork → configure). The environment variable `HERDR_FORK_LAYOUT` wins over the option, if you set it (for example in the `env` block of `~/.claude/settings.json`).
 
 | Value | Where the fork opens |
 |---|---|
@@ -43,7 +43,7 @@ To change where the fork opens, set the plugin's **Fork destination** option (`/
 | `tab` | New tab in the same workspace |
 | `workspace` | New workspace |
 
-When Herdr closes the fork's pane, the plugin stops the fork session. Set the **When the fork pane closes** option (or `HERDR_FORKS_ON_CLOSE`) to change this:
+When Herdr closes the fork's pane, the plugin stops the fork session. Set the **When the fork pane closes** option (or `HERDR_FORK_ON_CLOSE`) to change this:
 
 | Value | What happens when the pane closes |
 |---|---|

@@ -1,10 +1,10 @@
 {
-  "name": "herdr-forks",
-  "description": "The herdr-forks plugin: Claude session forks open in their own Herdr tab.",
+  "name": "herdr-fork",
+  "description": "The herdr-fork plugin: Claude session forks open in their own Herdr tab.",
   "owner": { "name": "izerozlu" },
   "plugins": [
     {
-      "name": "herdr-forks",
+      "name": "herdr-fork",
       "source": "./",
       "description": "Open forks of a Claude session in their own Herdr tab."
     }

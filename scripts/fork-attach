@@ -3,12 +3,12 @@
 #   Run by fork-open in the fork's pane: attach to the background fork session, and
 #   when Herdr closes the pane (SIGHUP) or kills it (SIGTERM), stop or remove the
 #   session. Leaving the attach view normally leaves the session alone.
-#   What happens on close: HERDR_FORKS_ON_CLOSE (fork-open sets it from the env or
+#   What happens on close: HERDR_FORK_ON_CLOSE (fork-open sets it from the env or
 #   the plugin's onClose option), else stop. stop keeps the conversation (claude attach <id> resumes it), remove
 #   runs claude rm (it refuses to discard unpushed worktree commits), keep does nothing.
 id=$1
-claude=${HERDR_FORKS_CLAUDE:-claude}
-on_close=${HERDR_FORKS_ON_CLOSE:-stop}
+claude=${HERDR_FORK_CLAUDE:-claude}
+on_close=${HERDR_FORK_ON_CLOSE:-stop}
 
 # Herdr kills what is left in a closed pane about a second after the hang-up, so the
 # cleanup runs detached in its own session (perl setsid) and this script exits at once.

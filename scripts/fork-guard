@@ -9,5 +9,5 @@ input=$(cat)
 jq -n '{hookSpecificOutput: {
   hookEventName: "PreToolUse",
   permissionDecision: "deny",
-  permissionDecisionReason: "herdr-forks: forks open in their own Herdr tab. Run `herdr-fork <name> \"<task>\"` in Bash instead (add -C <subdir> for a folder inside this one). The fork gets a copy of this conversation and writes its report to /tmp/herd/<name>.md."
+  permissionDecisionReason: "herdr-fork: forks open in their own Herdr tab. Run `herdr-fork <name> \"<task>\"` in Bash instead (add -C <subdir> for a folder inside this one). The fork gets a copy of this conversation and writes its report to /tmp/herd/<name>.md."
 }}'

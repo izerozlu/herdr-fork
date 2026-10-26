@@ -69,22 +69,22 @@ H
 chmod +x "$tmp/herdr"
 export HERDR_LOG=$tmp/herdr.log
 job=$tmp/job; mkdir -p "$job"
-tabhook() { : > "$HERDR_LOG"; HERDR_BIN_PATH=$tmp/herdr HERDR_WORKSPACE_ID=${WS-w1} HERDR_PANE_ID=${PANE-w1:p1} HERDR_FORKS_LAYOUT=${LAYOUT-} CLAUDE_PLUGIN_OPTION_LAYOUT=${OPTION-} HERDR_FORKS_ON_CLOSE=${ONCLOSE-} CLAUDE_PLUGIN_OPTION_ONCLOSE=${ONCLOSE_OPT-} CLAUDE_JOB_DIR=$job "$root/scripts/fork-open" <<<'{"session_id":"abcd1234-0000","cwd":"/work/proj"}' 2>&1; }
+tabhook() { : > "$HERDR_LOG"; HERDR_BIN_PATH=$tmp/herdr HERDR_WORKSPACE_ID=${WS-w1} HERDR_PANE_ID=${PANE-w1:p1} HERDR_FORK_LAYOUT=${LAYOUT-} CLAUDE_PLUGIN_OPTION_LAYOUT=${OPTION-} HERDR_FORK_ON_CLOSE=${ONCLOSE-} CLAUDE_PLUGIN_OPTION_ONCLOSE=${ONCLOSE_OPT-} CLAUDE_JOB_DIR=$job "$root/scripts/fork-open" <<<'{"session_id":"abcd1234-0000","cwd":"/work/proj"}' 2>&1; }
 tabhook >/dev/null
 check "no tab for plain bg session" "$(cat "$HERDR_LOG")" ""
 touch "$job/parent-transcript.jsonl"
 tabhook >/dev/null
 check "fork splits right by default" "$(sed -n 1p "$HERDR_LOG")" "pane split w1:p1 --direction right --cwd /work/proj --focus"
-check "fork split attaches" "$(sed -n 2p "$HERDR_LOG")" "pane run w1:p7 HERDR_FORKS_ON_CLOSE=stop '$root/scripts/fork-attach' abcd1234"
+check "fork split attaches" "$(sed -n 2p "$HERDR_LOG")" "pane run w1:p7 HERDR_FORK_ON_CLOSE=stop '$root/scripts/fork-attach' abcd1234"
 LAYOUT=down tabhook >/dev/null
 check "layout down" "$(sed -n 1p "$HERDR_LOG")" "pane split w1:p1 --direction down --cwd /work/proj --focus"
 LAYOUT=tab tabhook >/dev/null
 check "layout tab" "$(sed -n 1p "$HERDR_LOG")" "tab create --workspace w1 --cwd /work/proj --label fork abcd1234 --focus"
-check "fork tab attaches" "$(sed -n 2p "$HERDR_LOG")" "pane run w1:p9 HERDR_FORKS_ON_CLOSE=stop '$root/scripts/fork-attach' abcd1234"
+check "fork tab attaches" "$(sed -n 2p "$HERDR_LOG")" "pane run w1:p9 HERDR_FORK_ON_CLOSE=stop '$root/scripts/fork-attach' abcd1234"
 LAYOUT=left tabhook >/dev/null
 check "layout left splits right" "$(sed -n 1p "$HERDR_LOG")" "pane split w1:p1 --direction right --cwd /work/proj --focus"
 check "layout left swaps" "$(sed -n 2p "$HERDR_LOG")" "pane swap --source-pane w1:p7 --target-pane w1:p1"
-check "layout left attaches" "$(sed -n 3p "$HERDR_LOG")" "pane run w1:p7 HERDR_FORKS_ON_CLOSE=stop '$root/scripts/fork-attach' abcd1234"
+check "layout left attaches" "$(sed -n 3p "$HERDR_LOG")" "pane run w1:p7 HERDR_FORK_ON_CLOSE=stop '$root/scripts/fork-attach' abcd1234"
 LAYOUT=up tabhook >/dev/null
 check "layout up splits down" "$(sed -n 1p "$HERDR_LOG")" "pane split w1:p1 --direction down --cwd /work/proj --focus"
 check "layout up swaps" "$(sed -n 2p "$HERDR_LOG")" "pane swap --source-pane w1:p7 --target-pane w1:p1"
@@ -92,7 +92,7 @@ LAYOUT=right tabhook >/dev/null
 check "layout right does not swap" "$(grep -c swap "$HERDR_LOG")" 0
 LAYOUT=workspace tabhook >/dev/null
 check "layout workspace" "$(sed -n 1p "$HERDR_LOG")" "workspace create --cwd /work/proj --label fork abcd1234 --focus"
-check "workspace attaches" "$(sed -n 2p "$HERDR_LOG")" "pane run w2:p1 HERDR_FORKS_ON_CLOSE=stop '$root/scripts/fork-attach' abcd1234"
+check "workspace attaches" "$(sed -n 2p "$HERDR_LOG")" "pane run w2:p1 HERDR_FORK_ON_CLOSE=stop '$root/scripts/fork-attach' abcd1234"
 OPTION=down tabhook >/dev/null
 check "plugin option used" "$(sed -n 1p "$HERDR_LOG")" "pane split w1:p1 --direction down --cwd /work/proj --focus"
 OPTION=down LAYOUT=tab tabhook >/dev/null
@@ -100,12 +100,12 @@ check "env var beats plugin option" "$(sed -n 1p "$HERDR_LOG")" "tab create --wo
 PANE= LAYOUT=workspace tabhook >/dev/null
 check "workspace needs no pane id" "$(sed -n 1p "$HERDR_LOG")" "workspace create --cwd /work/proj --label fork abcd1234 --focus"
 ONCLOSE=remove tabhook >/dev/null
-has "onClose env passed to pane" "$(cat "$HERDR_LOG")" "HERDR_FORKS_ON_CLOSE=remove '"
+has "onClose env passed to pane" "$(cat "$HERDR_LOG")" "HERDR_FORK_ON_CLOSE=remove '"
 ONCLOSE_OPT=keep tabhook >/dev/null
-has "onClose option passed to pane" "$(cat "$HERDR_LOG")" "HERDR_FORKS_ON_CLOSE=keep '"
+has "onClose option passed to pane" "$(cat "$HERDR_LOG")" "HERDR_FORK_ON_CLOSE=keep '"
 out=$(ONCLOSE=nuke tabhook)
 has "bad onClose warns" "$out" "is not stop, remove or keep"
-has "bad onClose uses stop" "$(cat "$HERDR_LOG")" "HERDR_FORKS_ON_CLOSE=stop '"
+has "bad onClose uses stop" "$(cat "$HERDR_LOG")" "HERDR_FORK_ON_CLOSE=stop '"
 PANE= tabhook >/dev/null
 check "no pane id falls back to tab" "$(sed -n 1p "$HERDR_LOG")" "tab create --workspace w1 --cwd /work/proj --label fork abcd1234 --focus"
 out=$(LAYOUT=sideways tabhook)
@@ -128,7 +128,7 @@ chmod +x "$tmp/claude-bin"
 export CLAUDE_LOG=$tmp/claude.log
 attach() {  # attach [signal]: run fork-attach, send it the signal, list the calls
   : > "$CLAUDE_LOG"
-  HERDR_FORKS_CLAUDE=$tmp/claude-bin HERDR_FORKS_ON_CLOSE=${ONCLOSE-} "$root/scripts/fork-attach" abcd1234 &
+  HERDR_FORK_CLAUDE=$tmp/claude-bin HERDR_FORK_ON_CLOSE=${ONCLOSE-} "$root/scripts/fork-attach" abcd1234 &
   local pid=$!
   if [ -n "${1:-}" ]; then
     for _ in 1 2 3 4 5 6 7 8 9 10; do grep -q attach "$CLAUDE_LOG" && break; sleep 0.2; done

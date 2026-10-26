@@ -4,11 +4,11 @@
 # session does not have. Inside Herdr, open the fork next to the pane it was forked
 # from, running `claude attach <id>`, so it can be watched and prompted there.
 #
-# Where it opens: HERDR_FORKS_LAYOUT, else the plugin's `layout` option, else right.
+# Where it opens: HERDR_FORK_LAYOUT, else the plugin's `layout` option, else right.
 #   right, left, down, up  split the forking pane on that side
 #   tab                    new tab in the forking workspace
 #   workspace              new workspace
-# When Herdr closes the pane, fork-attach stops the fork (see HERDR_FORKS_ON_CLOSE or
+# When Herdr closes the pane, fork-attach stops the fork (see HERDR_FORK_ON_CLOSE or
 # the plugin's onClose option: stop, remove or keep).
 # Never fails the session: Herdr errors only print a note.
 set -uo pipefail
@@ -23,15 +23,15 @@ cwd=${cwd:-$PWD}
 herdr=${HERDR_BIN_PATH:-herdr}
 root=$(cd "$(dirname "$0")/.." && pwd)
 
-layout=${HERDR_FORKS_LAYOUT:-${CLAUDE_PLUGIN_OPTION_LAYOUT:-right}}
+layout=${HERDR_FORK_LAYOUT:-${CLAUDE_PLUGIN_OPTION_LAYOUT:-right}}
 case $layout in
   right|left|down|up|tab|workspace) ;;
-  *) echo "herdr-forks: layout $layout is not right, left, down, up, tab or workspace; using right" >&2; layout=right ;;
+  *) echo "herdr-fork: layout $layout is not right, left, down, up, tab or workspace; using right" >&2; layout=right ;;
 esac
-on_close=${HERDR_FORKS_ON_CLOSE:-${CLAUDE_PLUGIN_OPTION_ONCLOSE:-stop}}
+on_close=${HERDR_FORK_ON_CLOSE:-${CLAUDE_PLUGIN_OPTION_ONCLOSE:-stop}}
 case $on_close in
   stop|remove|keep) ;;
-  *) echo "herdr-forks: onClose $on_close is not stop, remove or keep; using stop" >&2; on_close=stop ;;
+  *) echo "herdr-fork: onClose $on_close is not stop, remove or keep; using stop" >&2; on_close=stop ;;
 esac
 # A split needs the forking pane; without it, fall back to a tab.
 if [ -z "${HERDR_PANE_ID:-}" ]; then
@@ -55,15 +55,15 @@ case $layout in
     query=.result.pane.pane_id ;;
 esac
 if [ "$rc" -ne 0 ]; then
-  echo "herdr-forks: could not open a $layout pane for fork $short: $created" >&2
+  echo "herdr-fork: could not open a $layout pane for fork $short: $created" >&2
   exit 0
 fi
 pane=$(jq -r "$query // empty" <<<"$created" 2>/dev/null)
 if [ -n "$pane" ] && { [ "$layout" = left ] || [ "$layout" = up ]; }; then
   "$herdr" pane swap --source-pane "$pane" --target-pane "$HERDR_PANE_ID" >/dev/null 2>&1 \
-    || echo "herdr-forks: fork $short opened $direction instead of $layout (the swap failed)" >&2
+    || echo "herdr-fork: fork $short opened $direction instead of $layout (the swap failed)" >&2
 fi
-if [ -z "$pane" ] || ! "$herdr" pane run "$pane" "HERDR_FORKS_ON_CLOSE=$on_close '$root/scripts/fork-attach' $short" >/dev/null 2>&1; then
-  echo "herdr-forks: opened a pane for fork $short but could not attach; run: claude attach $short" >&2
+if [ -z "$pane" ] || ! "$herdr" pane run "$pane" "HERDR_FORK_ON_CLOSE=$on_close '$root/scripts/fork-attach' $short" >/dev/null 2>&1; then
+  echo "herdr-fork: opened a pane for fork $short but could not attach; run: claude attach $short" >&2
 fi
 exit 0
