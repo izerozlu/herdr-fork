@@ -102,7 +102,7 @@ cat > "$tmp/herdr" <<'H'
 #!/usr/bin/env bash
 case "$1 $2" in "agent list"|"pane list") ;; *) echo "$*" >> "$HERDR_LOG" ;; esac
 case "$1 $2" in
-  "pane list") echo '{"result":{"panes":[{"pane_id":"w1:p1"},{"pane_id":"w3:p4"}]}}' ;;
+  "pane list") echo "{\"result\":{\"panes\":[{\"pane_id\":\"w1:p1\"},{\"pane_id\":\"w3:p4\"},{\"pane_id\":\"w6:p2\",\"workspace_id\":\"w6\",\"focused\":${FOCUSED:-false}}]}}" ;;
   "tab create") [ -n "${HERDR_FAIL:-}" ] && exit 1; echo '{"result":{"root_pane":{"pane_id":"w1:p9"},"tab":{"tab_id":"w1:t9"}}}' ;;
   "pane split") [ -n "${HERDR_FAIL:-}" ] && exit 1; echo '{"result":{"pane":{"pane_id":"w1:p7"}}}' ;;
   "workspace create") echo '{"result":{"root_pane":{"pane_id":"w2:p1"},"workspace":{"workspace_id":"w2"}}}' ;;
@@ -112,7 +112,7 @@ H
 chmod +x "$tmp/herdr"
 export HERDR_LOG=$tmp/herdr.log
 job=$tmp/job; mkdir -p "$job"
-tabhook() { : > "$HERDR_LOG"; HERDR_BIN_PATH=$tmp/herdr HERDR_WORKSPACE_ID=${WS-w1} HERDR_PANE_ID=${PANE-w1:p1} HERDR_FORK_LAYOUT=${LAYOUT-} CLAUDE_PLUGIN_OPTION_LAYOUT=${OPTION-} HERDR_FORK_ON_CLOSE=${ONCLOSE-} CLAUDE_PLUGIN_OPTION_ONCLOSE=${ONCLOSE_OPT-} CLAUDE_JOB_DIR=$job "$root/scripts/fork-open" <<<'{"session_id":"abcd1234-0000","cwd":"/work/proj"}' 2>&1; }
+tabhook() { : > "$HERDR_LOG"; FOCUSED=${FOCUSED-false} HERDR_BIN_PATH=$tmp/herdr HERDR_WORKSPACE_ID=${WS-w1} HERDR_PANE_ID=${PANE-w1:p1} HERDR_FORK_LAYOUT=${LAYOUT-} CLAUDE_PLUGIN_OPTION_LAYOUT=${OPTION-} HERDR_FORK_ON_CLOSE=${ONCLOSE-} CLAUDE_PLUGIN_OPTION_ONCLOSE=${ONCLOSE_OPT-} CLAUDE_JOB_DIR=$job "$root/scripts/fork-open" <<<'{"session_id":"abcd1234-0000","cwd":"/work/proj"}' 2>&1; }
 tabhook >/dev/null
 check "no tab for plain bg session" "$(cat "$HERDR_LOG")" ""
 touch "$job/parent-transcript.jsonl"
@@ -172,6 +172,14 @@ echo '{"forkParentSessionId":"child-sid"}' > "$job/state.json"
 mkdir -p "$tmp/claude/jobs/child-si"; echo '{"forkParentSessionId":"cont-sid"}' > "$tmp/claude/jobs/child-si/state.json"
 tabhook >/dev/null
 check "walks back a fork of a fork" "$(sed -n 1p "$HERDR_LOG")" "pane split w3:p4 --direction right --cwd /work/proj --focus"
+echo '{"forkParentSessionId":"gone-sid"}' > "$job/state.json"
+FOCUSED=true tabhook >/dev/null
+check "unknown parent uses focused pane" "$(sed -n 1p "$HERDR_LOG")" "pane split w6:p2 --direction right --cwd /work/proj --focus"
+FOCUSED=true LAYOUT=tab tabhook >/dev/null
+check "unknown parent uses focused workspace" "$(sed -n 1p "$HERDR_LOG")" "tab create --workspace w6 --cwd /work/proj --label fork abcd1234 --focus"
+echo '{"forkParentSessionId":"parent-sid"}' > "$job/state.json"
+FOCUSED=true tabhook >/dev/null
+check "known parent beats focused pane" "$(sed -n 1p "$HERDR_LOG")" "pane split w3:p4 --direction right --cwd /work/proj --focus"
 rm -r "$tmp/claude/projects/p" "$tmp/claude/jobs"
 rm "$job/state.json"
 PANE=w1:gone tabhook >/dev/null

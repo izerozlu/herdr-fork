@@ -48,11 +48,17 @@ for _ in 1 2 3 4 5; do
   [ -n "$found" ] && break
   s=$(before "$s")
 done
+# Herdr can also know a pane by an older session (for example after a resume), so
+# the walk can miss. /fork was just typed, so then take Herdr's focused pane.
+panes=$("$herdr" pane list 2>/dev/null)
+if [ -z "$found" ]; then
+  found=$(jq -r 'first(.result.panes[] | select(.focused) | "\(.workspace_id) \(.pane_id)") // empty' <<<"$panes" 2>/dev/null)
+fi
 if [ -n "$found" ]; then
   HERDR_WORKSPACE_ID=${found% *}
   HERDR_PANE_ID=${found#* }
-elif [ -n "${HERDR_PANE_ID:-}" ] && ! "$herdr" pane list 2>/dev/null \
-    | jq -e --arg p "$HERDR_PANE_ID" 'any(.result.panes[]; .pane_id == $p)' >/dev/null 2>&1; then
+elif [ -n "${HERDR_PANE_ID:-}" ] && ! jq -e --arg p "$HERDR_PANE_ID" \
+    'any(.result.panes[]; .pane_id == $p)' <<<"$panes" >/dev/null 2>&1; then
   HERDR_PANE_ID=""  # a closed pane: open a tab instead
 fi
 
