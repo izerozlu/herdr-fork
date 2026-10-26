@@ -43,6 +43,16 @@ To change where the fork opens, set the plugin's **Fork destination** option (`/
 | `tab` | New tab in the same workspace |
 | `workspace` | New workspace |
 
+When Herdr closes the fork's pane, the plugin stops the fork session. Set the **When the fork pane closes** option (or `HERDR_FORKS_ON_CLOSE`) to change this:
+
+| Value | What happens when the pane closes |
+|---|---|
+| `stop` (default) | `claude stop <id>`. The conversation is kept; `claude attach <id>` opens it again. |
+| `remove` | `claude stop <id>`, then `claude rm <id>`. `rm` does not discard unpushed worktree commits. |
+| `keep` | Nothing. The fork keeps running in the background. |
+
+Leaving the attach view (← or Ctrl+Z) does not stop the fork. Only closing the pane does.
+
 Claude can also fork itself with the `herdr-fork` command:
 
 ```

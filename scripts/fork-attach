@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# fork-attach <id>
+#   Run by fork-open in the fork's pane: attach to the background fork session, and
+#   when Herdr closes the pane (SIGHUP) or kills it (SIGTERM), stop or remove the
+#   session. Leaving the attach view normally leaves the session alone.
+#   What happens on close: HERDR_FORKS_ON_CLOSE (fork-open sets it from the env or
+#   the plugin's onClose option), else stop. stop keeps the conversation (claude attach <id> resumes it), remove
+#   runs claude rm (it refuses to discard unpushed worktree commits), keep does nothing.
+id=$1
+claude=${HERDR_FORKS_CLAUDE:-claude}
+on_close=${HERDR_FORKS_ON_CLOSE:-stop}
+
+closed() {
+  trap '' HUP TERM INT
+  case $on_close in
+    stop) "$claude" stop "$id" ;;
+    remove) "$claude" stop "$id"; "$claude" rm "$id" ;;
+  esac </dev/null >/dev/null 2>&1
+  exit 0
+}
+trap closed HUP TERM
+
+"$claude" attach "$id"

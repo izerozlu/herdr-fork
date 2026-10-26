@@ -1,7 +1,7 @@
 {
   "name": "herdr-forks",
   "displayName": "Herdr Forks",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Forks of a Claude session open in their own Herdr tab: herdr-fork starts a copy of the current conversation in a new tab of the session's workspace, and a hook sends built-in fork subagents there instead.",
   "keywords": [
     "herdr",
@@ -16,6 +16,12 @@
       "title": "Fork destination",
       "description": "Where /fork opens the fork: right, left, down or up (split the session pane on that side), tab (new tab) or workspace (new workspace).",
       "default": "right"
+    },
+    "onClose": {
+      "type": "string",
+      "title": "When the fork pane closes",
+      "description": "What happens to the fork session when Herdr closes its pane: stop (keep the conversation; claude attach <id> resumes it), remove (claude rm; unpushed worktree commits are never discarded) or keep (leave it running).",
+      "default": "stop"
     }
   }
 }
