@@ -2,13 +2,13 @@
 
 A Claude Code plugin for [Herdr](https://herdr.dev). It opens forks of a Claude session in their own Herdr tab. A fork is a new agent that starts with a copy of the whole conversation so far.
 
-It builds on [herdr-lock](https://github.com/aalvarezdeliveryhub/herdr-lock): `herdr-lock`'s `herdr-worker` opens the tab, so forks stay in the session's workspace and folder.
+The plugin stands alone. Its tab handling was inspired by [herdr-lock](https://github.com/aalvarezdeliveryhub/herdr-lock), but herdr-lock is not needed.
 
 ## What it does
 
 | Part | What it does |
 |---|---|
-| `herdr-fork` command | Starts `claude --resume <this session> --fork-session` in a new tab of this workspace (through `herdr-worker`), then sends it the task. |
+| `herdr-fork` command | Starts `claude --resume <this session> --fork-session` in a new tab of this workspace, then sends it the task. |
 | Fork pane (SessionStart hook) | When you type `/fork` inside Herdr, Claude Code starts the fork as a background session. The hook opens a new pane next to the session (or a tab or workspace, see below) and runs `claude attach <id>` in it, so you can see the fork and type to it there. |
 | Guard (PreToolUse hook on the Agent tool) | Inside Herdr, blocks the built-in fork subagent (`subagent_type: "fork"`) and tells Claude to use `herdr-fork`. Other agent types are not changed. |
 | Fork rule (SessionStart hook) | Inside Herdr, tells Claude to fork with `herdr-fork`. |
@@ -16,7 +16,6 @@ It builds on [herdr-lock](https://github.com/aalvarezdeliveryhub/herdr-lock): `h
 ## Requirements
 
 - Claude Code with plugin support, run inside a Herdr pane
-- The herdr-lock plugin (`claude plugin install herdr-lock@herdr-lock`)
 - `jq`
 
 ## Install (local checkout)
@@ -57,13 +56,16 @@ Claude can also fork itself with the `herdr-fork` command:
 
 ```
 herdr-fork [-a "claude args"] [-C subdir] <name> "<task>"
+herdr-fork list
+herdr-fork close <name>
 ```
 
 - `-a` replaces the default `--permission-mode auto`. `--resume` and `--fork-session` are always added.
-- `-C` opens the fork in a folder inside this one, for example a git worktree in `.worktrees/<name>`.
+- `-C` opens the fork in a folder inside this one, for example a git worktree in `.worktrees/<name>`. A folder outside this one is refused.
 - The fork writes its report to `/tmp/herd/<name>.md`.
-- `herdr-worker list` and `herdr-worker close <name>` work for fork tabs too.
-- Exit status is the same as `herdr-worker` (3 means the fork waits at a startup prompt, for example "trust this folder?").
+- The name must be unique across all Herdr agents.
+- `herdr-fork list` shows the other agents in this workspace. `herdr-fork close <name>` closes a fork's tab.
+- Exit status: 0 ok, 1 Herdr error, 2 refused, 3 the fork waits at a startup prompt (for example "trust this folder?") and has not got its task yet.
 
 ## Tests
 

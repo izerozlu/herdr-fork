@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Offline tests: herdr-fork against a stand-in herdr-worker, and the two hooks.
+# Offline tests: herdr-fork and the hooks, against stand-in herdr and claude commands.
 set -uo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
@@ -7,42 +7,83 @@ pass=0; fail=0
 check() { if [ "$2" = "$3" ]; then pass=$((pass+1)); else fail=$((fail+1)); printf 'FAIL %s\n  want: %s\n  got:  %s\n' "$1" "$3" "$2"; fi; }
 has() { case "$2" in *"$3"*) pass=$((pass+1)) ;; *) fail=$((fail+1)); printf 'FAIL %s\n  missing: %s\n  in: %s\n' "$1" "$3" "$2" ;; esac; }
 
-# Stand-in herdr-worker: print each argument on its own line.
-cat > "$tmp/herdr-worker" <<'W'
+# Stand-in herdr for herdr-fork: logs each call (one argument per line, then ---)
+# and answers like Herdr. FORK_START=fail|notready|trust changes `agent start`.
+cat > "$tmp/herdr-f" <<'H'
 #!/usr/bin/env bash
-printf '%s\n' "$@"
-W
-chmod +x "$tmp/herdr-worker"
-export HERDR_WORKER=$tmp/herdr-worker CLAUDE_CONFIG_DIR=$tmp/claude
+{ printf '%s\n' "$@"; echo ---; } >> "$FORK_LOG"
+case "$1 $2" in
+  "agent list") echo '{"result":{"agents":[{"name":"taken","workspace_id":"w9","pane_id":"w9:p1","tab_id":"w9:t1"},{"name":"me","workspace_id":"w1","pane_id":"w1:p1","tab_id":"w1:t1"},{"name":"other","workspace_id":"w1","pane_id":"w1:p5","tab_id":"w1:t5","agent_status":"idle","cwd":"/x"}]}}' ;;
+  "tab create") echo '{"result":{"root_pane":{"pane_id":"w1:p9"},"tab":{"tab_id":"w1:t9"}}}' ;;
+  "agent start")
+    case ${FORK_START:-} in
+      fail) echo '{"error":{"code":"boom"}}' >&2; exit 1 ;;
+      notready|trust) echo '{"error":{"code":"agent_not_ready"}}' >&2; exit 1 ;;
+    esac ;;
+  "pane read") [ "${FORK_START:-}" = trust ] && echo "Do you trust this folder?" ;;
+esac
+exit 0
+H
+chmod +x "$tmp/herdr-f"
+export CLAUDE_CONFIG_DIR=$tmp/claude FORK_LOG=$tmp/fork.log
 proj=$tmp/proj; mkdir -p "$proj/.worktrees/fx"; proj=$(cd "$proj" && pwd -P)
 enc() { printf '%s' "$1" | sed 's/[^a-zA-Z0-9]/-/g'; }
 mkdir -p "$tmp/claude/projects/$(enc "$proj")"
 echo '{}' > "$tmp/claude/projects/$(enc "$proj")/sid-1.jsonl"
-fork() { (cd "$proj" && CLAUDE_CODE_SESSION_ID=${SID-sid-1} "$root/bin/herdr-fork" "$@"); }
+fork() { : > "$FORK_LOG"; (cd "$proj" && HERDR_BIN_PATH=$tmp/herdr-f HERDR_WORKSPACE_ID=${WS-w1} HERDR_PANE_ID=w1:p1 CLAUDE_CODE_SESSION_ID=${SID-sid-1} "$root/bin/herdr-fork" "$@"); }
+call() { awk -v want="$1 " 'BEGIN{RS="---\n"} { gsub(/\n/, " "); if (index($0, want) == 1) printf "%s", $0 }' "$FORK_LOG"; }
 
 out=$(fork fx "fix the docs"); code=$?
 check "fork exits 0" "$code" 0
-check "default args" "$(sed -n 2p <<<"$out")" "--permission-mode auto --resume sid-1 --fork-session"
-check "name passed" "$(sed -n 3p <<<"$out")" fx
-has "task passed" "$out" "fix the docs"
-has "task says fork" "$out" "You are a fork of the conversation above"
+check "fork opens tab" "$(call "tab")" "tab create --workspace w1 --cwd $proj --label fx --no-focus "
+check "default args" "$(call "agent start")" "agent start fx --kind claude --pane w1:p9 -- --permission-mode auto --resume sid-1 --fork-session "
+has "task sent" "$(call "agent prompt")" "fix the docs"
+has "task says fork" "$(call "agent prompt")" "You are a fork of the conversation above"
+has "task asks for report" "$(call "agent prompt")" "/tmp/herd/fx.md"
+has "fork prints summary" "$out" "fork=fx session=sid-1 tab=w1:t9"
 
-out=$(fork -a "--model opus" fx "t")
-check "-a replaces default" "$(sed -n 2p <<<"$out")" "--model opus --resume sid-1 --fork-session"
+fork -a "--model opus" fx "t" >/dev/null
+check "-a replaces default" "$(call "agent start")" "agent start fx --kind claude --pane w1:p9 -- --model opus --resume sid-1 --fork-session "
 
-out=$(fork -C .worktrees/fx fx "t")
-check "-C passed on" "$(sed -n 3,4p <<<"$out" | tr '\n' ' ')" "-C .worktrees/fx "
+fork -C .worktrees/fx fx "t" >/dev/null
+has "-C sets tab folder" "$(call "tab")" "--cwd $proj/.worktrees/fx "
 
 err=$(SID= fork fx t 2>&1); code=$?
 check "no session id refused" "$code" 2; has "no session id message" "$err" CLAUDE_CODE_SESSION_ID
+err=$(WS= fork fx t 2>&1); code=$?
+check "outside Herdr refused" "$code" 2; has "outside Herdr message" "$err" HERDR_WORKSPACE_ID
 err=$(SID=sid-missing fork fx t 2>&1); code=$?
 check "missing transcript refused" "$code" 2
 err=$(fork fx 2>&1); code=$?
 check "missing task refused" "$code" 2
 err=$(fork -C nope fx t 2>&1); code=$?
 check "bad -C refused" "$code" 2
-err=$(cd "$proj" && CLAUDE_CODE_SESSION_ID=sid-1 HERDR_WORKER= PATH=/usr/bin:/bin "$root/bin/herdr-fork" fx t 2>&1); code=$?
-check "no herdr-worker refused" "$code" 2; has "no herdr-worker message" "$err" herdr-lock
+err=$(fork -C .. fx t 2>&1); code=$?
+check "-C outside folder refused" "$code" 2
+err=$(fork taken t 2>&1); code=$?
+check "name in use refused" "$code" 2; has "name in use message" "$err" "already in use"
+check "name in use opens no tab" "$(call "tab")" ""
+
+err=$(FORK_START=fail fork fx t 2>&1); code=$?
+check "start failure exits 1" "$code" 1
+check "start failure closes tab" "$(call "tab close")" "tab close w1:t9 "
+err=$(FORK_START=trust fork fx t 2>&1); code=$?
+check "trust prompt exits 3" "$code" 3; has "trust prompt message" "$err" "folder-trust prompt"
+has "trust prompt keeps task" "$(cat /tmp/herd/fx.task)" "You are a fork"
+check "trust prompt sends no task" "$(call "agent prompt")" ""
+err=$(FORK_START=notready fork fx t 2>&1); code=$?
+check "blocked start exits 3" "$code" 3; has "blocked start message" "$err" "blocked during startup"
+rm -f /tmp/herd/fx.task
+
+check "list shows this workspace" "$(fork list)" "$(printf 'other\tw1:t5\tidle\t/x')"
+out=$(fork close other); code=$?
+check "close exits 0" "$code" 0; check "close closes tab" "$(call "tab close")" "tab close w1:t5 "
+err=$(fork close taken 2>&1); code=$?
+check "close other workspace refused" "$code" 2
+err=$(fork close me 2>&1); code=$?
+check "close own tab refused" "$code" 2
+err=$(fork close nobody 2>&1); code=$?
+check "close unknown refused" "$code" 2
 
 guard() { HERDR_WORKSPACE_ID=${WS-w1} "$root/scripts/fork-guard" <<<"$1"; }
 out=$(guard '{"tool_name":"Agent","tool_input":{"subagent_type":"fork","prompt":"x"}}')

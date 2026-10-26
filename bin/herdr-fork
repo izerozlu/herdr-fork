@@ -2,25 +2,62 @@
 # herdr-fork [-a "extra claude args"] [-C subdir] <name> <task...>
 #   Fork the calling Claude session into a new tab of its Herdr workspace. The fork
 #   starts with a copy of the whole conversation so far (claude --resume <id>
-#   --fork-session), then gets <task>. The tab is opened by herdr-lock's
-#   herdr-worker, so the same workspace and folder rules apply.
+#   --fork-session), then gets <task>. It opens in the caller's folder or (with -C)
+#   a folder inside it, and writes its report to /tmp/herd/<name>.md.
+# herdr-fork list
+#   List the other agents in the caller's workspace (forks among them).
+# herdr-fork close <name>
+#   Close a fork's tab in the caller's workspace.
 #
-# Exit status: as herdr-worker (0 ok, 1 Herdr error, 2 refused, 3 blocked at
-# startup), plus 2 when this is not a Claude session or herdr-worker is missing.
+# Exit status: 0 ok, 1 Herdr error, 2 refused (bad arguments, not in Herdr or a
+# Claude session, name in use, folder outside the caller's), 3 the fork started but
+# is blocked at startup (e.g. a folder-trust prompt) and has not received its task.
 set -euo pipefail
+herdr=${HERDR_BIN_PATH:-herdr}
+
+if [ -z "${HERDR_WORKSPACE_ID:-}" ]; then
+  echo "herdr-fork: this session does not run inside Herdr (HERDR_WORKSPACE_ID is not set)" >&2
+  exit 2
+fi
+
+agents_json() { "$herdr" agent list | jq -c '.result.agents'; }
+
+case "${1:-}" in
+  list)
+    agents_json | jq -r --arg ws "$HERDR_WORKSPACE_ID" --arg me "${HERDR_PANE_ID:-}" '
+      .[] | select(.workspace_id == $ws and .pane_id != $me)
+      | "\(.name)\t\(.tab_id)\t\(.agent_status // "-")\t\(.cwd // "-")"'
+    exit 0 ;;
+  close)
+    [ $# -eq 2 ] || { echo "usage: herdr-fork close <name>" >&2; exit 2; }
+    found=$(agents_json | jq -c --arg n "$2" '.[] | select(.name == $n)')
+    if [ -z "$found" ]; then
+      echo "herdr-fork: no agent named $2" >&2; exit 2
+    fi
+    if [ "$(jq -r .workspace_id <<<"$found")" != "$HERDR_WORKSPACE_ID" ]; then
+      echo "herdr-fork: $2 is in another workspace; only tabs in this one can be closed here" >&2; exit 2
+    fi
+    if [ "$(jq -r .pane_id <<<"$found")" = "${HERDR_PANE_ID:-}" ]; then
+      echo "herdr-fork: $2 is running in your own tab; refusing to close it" >&2; exit 2
+    fi
+    tab=$(jq -r .tab_id <<<"$found")
+    "$herdr" tab close "$tab" >/dev/null
+    echo "closed $2 ($tab)"
+    exit 0 ;;
+esac
 
 extra="--permission-mode auto"
-sub=""
+dir=$PWD
 while getopts "a:C:" opt; do
   case $opt in
     a) extra=$OPTARG ;;
-    C) sub=$OPTARG ;;
+    C) dir=$OPTARG ;;
     *) exit 2 ;;
   esac
 done
 shift $((OPTIND - 1))
 if [ $# -lt 2 ]; then
-  echo "usage: herdr-fork [-a \"claude args\"] [-C subdir] <name> <task...>" >&2
+  echo "usage: herdr-fork [-a \"claude args\"] [-C subdir] <name> <task...> | list | close <name>" >&2
   exit 2
 fi
 name=$1; shift
@@ -31,11 +68,6 @@ if [ -z "$session" ]; then
   echo "herdr-fork: CLAUDE_CODE_SESSION_ID is not set; run herdr-fork from a Claude Code session's shell" >&2
   exit 2
 fi
-worker=${HERDR_WORKER:-$(command -v herdr-worker || true)}
-if [ -z "$worker" ]; then
-  echo "herdr-fork: herdr-worker not found; install the herdr-lock plugin (claude plugin install herdr-lock@herdr-lock)" >&2
-  exit 2
-fi
 
 # Claude Code keeps each session at ~/.claude/projects/<folder>/<id>.jsonl.
 # --resume finds it from any folder, so a fork in -C <subdir> works as well.
@@ -44,15 +76,42 @@ if [ -z "$(find "$projects" -maxdepth 2 -name "$session.jsonl" -print -quit 2>/d
   echo "herdr-fork: no transcript for session $session under $projects" >&2
   exit 2
 fi
-if [ -n "$sub" ] && [ ! -d "$sub" ]; then
-  echo "herdr-fork: -C folder not found" >&2
+dir=$(cd "$dir" 2>/dev/null && pwd -P) || { echo "herdr-fork: -C folder not found" >&2; exit 2; }
+here=$(pwd -P)
+case "$dir/" in
+  "$here/"*) ;;
+  *) echo "herdr-fork: -C $dir is outside the caller's folder ($here)" >&2; exit 2 ;;
+esac
+if [ -n "$(agents_json | jq -r --arg n "$name" '.[] | select(.name == $n) | .name')" ]; then
+  echo "herdr-fork: the name $name is already in use by a Herdr agent (names are unique across all workspaces); pick another" >&2
   exit 2
 fi
 
+mkdir -p /tmp/herd
+report=/tmp/herd/$name.md
 task="You are a fork of the conversation above, running in your own Herdr tab named $name. The session you were forked from keeps working on its own; do not repeat its work. Your task:
 
-$task"
+$task
 
-args=(-a "$extra --resume $session --fork-session")
-[ -n "$sub" ] && args+=(-C "$sub")
-exec "$worker" "${args[@]}" "$name" "$task"
+When you are completely done, write a full report (what you did, files touched, how you verified it) to $report. Keep your terminal reply to a short summary."
+
+created=$("$herdr" tab create --workspace "$HERDR_WORKSPACE_ID" --cwd "$dir" --label "$name" --no-focus) || exit 1
+pane=$(jq -r '.result.root_pane.pane_id' <<<"$created")
+tab=$(jq -r '.result.tab.tab_id' <<<"$created")
+# $extra is deliberately word-split into claude args
+if ! start_err=$("$herdr" agent start "$name" --kind claude --pane "$pane" -- $extra --resume "$session" --fork-session 2>&1 >/dev/null); then
+  if [ "$(jq -r '.error.code // empty' <<<"$start_err" 2>/dev/null)" = agent_not_ready ]; then
+    printf '%s\n' "$task" > "/tmp/herd/$name.task"
+    if "$herdr" pane read "$pane" --source visible 2>/dev/null | grep -qi "trust"; then
+      echo "herdr-fork: $name is waiting at a folder-trust prompt in tab $tab ($dir). Ask the user to approve it there, then send the task with: herdr agent prompt $name \"\$(cat /tmp/herd/$name.task)\"" >&2
+    else
+      echo "herdr-fork: $name is blocked during startup in tab $tab; read it with: herdr agent read $name --source visible. Once it is ready, send the task with: herdr agent prompt $name \"\$(cat /tmp/herd/$name.task)\"" >&2
+    fi
+    exit 3
+  fi
+  "$herdr" tab close "$tab" >/dev/null 2>&1 || true
+  echo "herdr-fork: $name did not start, so its tab $tab was closed: $start_err" >&2
+  exit 1
+fi
+"$herdr" agent prompt "$name" "$task" >/dev/null
+echo "fork=$name session=$session tab=$tab pane=$pane cwd=$dir report=$report"
