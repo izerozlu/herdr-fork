@@ -100,7 +100,11 @@ check "no rule outside Herdr" "$(HERDR_WORKSPACE_ID= "$root/scripts/fork-rule" <
 # fork-tab: a stand-in herdr logs its calls.
 cat > "$tmp/herdr" <<'H'
 #!/usr/bin/env bash
-case "$1 $2" in "agent list"|"pane list") ;; *) echo "$*" >> "$HERDR_LOG" ;; esac
+case "$1 $2" in
+  "agent list"|"pane list") ;;
+  "pane rename"|"pane report-agent-session") echo "$*" >> "$HERDR_LOG.meta" ;;
+  *) echo "$*" >> "$HERDR_LOG" ;;
+esac
 case "$1 $2" in
   "pane list") echo "{\"result\":{\"panes\":[{\"pane_id\":\"w1:p1\"},{\"pane_id\":\"w3:p4\"},{\"pane_id\":\"w6:p2\",\"workspace_id\":\"w6\",\"focused\":${FOCUSED:-false}}]}}" ;;
   "tab create") [ -n "${HERDR_FAIL:-}" ] && exit 1; echo '{"result":{"root_pane":{"pane_id":"w1:p9"},"tab":{"tab_id":"w1:t9"}}}' ;;
@@ -112,7 +116,7 @@ H
 chmod +x "$tmp/herdr"
 export HERDR_LOG=$tmp/herdr.log
 job=$tmp/job; mkdir -p "$job"
-tabhook() { : > "$HERDR_LOG"; FOCUSED=${FOCUSED-false} HERDR_BIN_PATH=$tmp/herdr HERDR_WORKSPACE_ID=${WS-w1} HERDR_PANE_ID=${PANE-w1:p1} HERDR_FORK_LAYOUT=${LAYOUT-} CLAUDE_PLUGIN_OPTION_LAYOUT=${OPTION-} HERDR_FORK_ON_CLOSE=${ONCLOSE-} CLAUDE_PLUGIN_OPTION_ONCLOSE=${ONCLOSE_OPT-} CLAUDE_JOB_DIR=$job "$root/scripts/fork-open" <<<'{"session_id":"abcd1234-0000","cwd":"/work/proj"}' 2>&1; }
+tabhook() { : > "$HERDR_LOG"; : > "$HERDR_LOG.meta"; FOCUSED=${FOCUSED-false} HERDR_BIN_PATH=$tmp/herdr HERDR_WORKSPACE_ID=${WS-w1} HERDR_PANE_ID=${PANE-w1:p1} HERDR_FORK_LAYOUT=${LAYOUT-} CLAUDE_PLUGIN_OPTION_LAYOUT=${OPTION-} HERDR_FORK_ON_CLOSE=${ONCLOSE-} CLAUDE_PLUGIN_OPTION_ONCLOSE=${ONCLOSE_OPT-} CLAUDE_JOB_DIR=$job "$root/scripts/fork-open" <<<'{"session_id":"abcd1234-0000","cwd":"/work/proj"}' 2>&1; }
 tabhook >/dev/null
 check "no tab for plain bg session" "$(cat "$HERDR_LOG")" ""
 touch "$job/parent-transcript.jsonl"
@@ -184,6 +188,18 @@ rm -r "$tmp/claude/projects/p" "$tmp/claude/jobs"
 rm "$job/state.json"
 PANE=w1:gone tabhook >/dev/null
 check "closed env pane falls back to tab" "$(sed -n 1p "$HERDR_LOG")" "tab create --workspace w1 --cwd /work/proj --label fork abcd1234 --focus"
+tabhook >/dev/null
+check "pane gets fallback label" "$(sed -n 1p "$HERDR_LOG.meta")" "pane rename w1:p7 fork abcd1234"
+check "pane reports fork session" "$(sed -n 2p "$HERDR_LOG.meta")" "pane report-agent-session w1:p7 --source herdr-fork --agent claude --agent-session-id abcd1234-0000"
+echo '{"name":"main work ⑂ suggest topics"}' > "$job/state.json"
+tabhook >/dev/null
+check "pane gets fork name" "$(sed -n 1p "$HERDR_LOG.meta")" "pane rename w1:p7 ⑂ suggest topics"
+LAYOUT=tab tabhook >/dev/null
+check "tab gets fork name" "$(sed -n 1p "$HERDR_LOG")" "tab create --workspace w1 --cwd /work/proj --label ⑂ suggest topics --focus"
+echo '{"name":"main work ⑂ give me a description for the github repo please"}' > "$job/state.json"
+tabhook >/dev/null
+check "long name is cut" "$(sed -n 1p "$HERDR_LOG.meta")" "pane rename w1:p7 ⑂ give me a description for the github r…"
+rm "$job/state.json"
 WS= tabhook >/dev/null
 check "no tab outside Herdr" "$(cat "$HERDR_LOG")" ""
 out=$(HERDR_FAIL=1 tabhook); code=$?

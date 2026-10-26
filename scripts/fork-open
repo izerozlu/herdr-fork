@@ -62,6 +62,11 @@ elif [ -n "${HERDR_PANE_ID:-}" ] && ! jq -e --arg p "$HERDR_PANE_ID" \
   HERDR_PANE_ID=""  # a closed pane: open a tab instead
 fi
 
+# Label the fork's pane (and tab or workspace) with the fork's name. /fork names it
+# "<forking session's name> ⑂ <the /fork text>"; keep only "⑂ <text>" and cut it.
+name=$(jq -r '.name // empty' "$CLAUDE_JOB_DIR/state.json" 2>/dev/null)
+label=$(printf '%s' "${name:-fork $short}" | perl -CS -pe 's/^.*?\x{2442}\s*/\x{2442} /; s/^(.{40}).+$/$1\x{2026}/s; s/\s+\x{2026}$/\x{2026}/')
+
 layout=${HERDR_FORK_LAYOUT:-${CLAUDE_PLUGIN_OPTION_LAYOUT:-right}}
 case $layout in
   right|left|down|up|tab|workspace) ;;
@@ -84,10 +89,10 @@ case $layout in
 esac
 case $layout in
   tab)
-    created=$("$herdr" tab create --workspace "$HERDR_WORKSPACE_ID" --cwd "$cwd" --label "fork $short" --focus 2>&1); rc=$?
+    created=$("$herdr" tab create --workspace "$HERDR_WORKSPACE_ID" --cwd "$cwd" --label "$label" --focus 2>&1); rc=$?
     query=.result.root_pane.pane_id ;;
   workspace)
-    created=$("$herdr" workspace create --cwd "$cwd" --label "fork $short" --focus 2>&1); rc=$?
+    created=$("$herdr" workspace create --cwd "$cwd" --label "$label" --focus 2>&1); rc=$?
     query=.result.root_pane.pane_id ;;
   *)
     created=$("$herdr" pane split "$HERDR_PANE_ID" --direction "$direction" --cwd "$cwd" --focus 2>&1); rc=$?
@@ -101,6 +106,12 @@ pane=$(jq -r "$query // empty" <<<"$created" 2>/dev/null)
 if [ -n "$pane" ] && { [ "$layout" = left ] || [ "$layout" = up ]; }; then
   "$herdr" pane swap --source-pane "$pane" --target-pane "$HERDR_PANE_ID" >/dev/null 2>&1 \
     || echo "herdr-fork: fork $short opened $direction instead of $layout (the swap failed)" >&2
+fi
+if [ -n "$pane" ]; then
+  "$herdr" pane rename "$pane" "$label" >/dev/null 2>&1 || true
+  # Tell Herdr which session runs in the pane, so a /fork typed in it finds the pane.
+  "$herdr" pane report-agent-session "$pane" --source herdr-fork --agent claude \
+    --agent-session-id "$session" >/dev/null 2>&1 || true
 fi
 if [ -z "$pane" ] || ! "$herdr" pane run "$pane" "HERDR_FORK_ON_CLOSE=$on_close '$root/scripts/fork-attach' $short" >/dev/null 2>&1; then
   echo "herdr-fork: opened a pane for fork $short but could not attach; run: claude attach $short" >&2
