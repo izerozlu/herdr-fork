@@ -2,7 +2,7 @@
 
 A Claude Code plugin for [Herdr](https://herdr.dev). It opens forks of a Claude session in their own Herdr tab. A fork is a new agent that starts with a copy of the whole conversation so far.
 
-The plugin stands alone. Its tab handling was inspired by [herdr-lock](https://github.com/aalvarezdeliveryhub/herdr-lock), but herdr-lock is not needed.
+The plugin's tab handling was inspired by [herdr-lock](https://github.com/aalvarezdeliveryhub/herdr-lock). Kudos to [aalvarezdeliveryhub](https://github.com/aalvarezdeliveryhub) for the inspiration.
 
 ## What it does
 

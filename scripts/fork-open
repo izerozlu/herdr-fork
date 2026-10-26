@@ -26,15 +26,34 @@ root=$(cd "$(dirname "$0")/.." && pwd)
 
 # /fork can hand the fork to a spare session that started earlier, so its
 # HERDR_PANE_ID and HERDR_WORKSPACE_ID can belong to another (or a closed) pane.
-# Find the forking session's pane through Herdr; keep the env values otherwise.
-parent=$(jq -r '.forkParentSessionId // empty' "$CLAUDE_JOB_DIR/state.json" 2>/dev/null)
-if [ -n "$parent" ]; then
-  found=$("$herdr" agent list 2>/dev/null | jq -r --arg s "$parent" \
-    'first(.result.agents[] | select(.agent_session.value == $s) | "\(.workspace_id) \(.pane_id)") // empty' 2>/dev/null)
-  if [ -n "$found" ]; then
-    HERDR_WORKSPACE_ID=${found% *}
-    HERDR_PANE_ID=${found#* }
-  fi
+# Find the forking session's pane through Herdr. Herdr knows a pane by the session
+# that started in it, so when the forking session is not listed, walk back: to the
+# session that continued in it (its transcript says "continued-in"), else to its
+# own fork parent. Keep the env values when nothing is found.
+config=${CLAUDE_CONFIG_DIR:-$HOME/.claude}
+agents=$("$herdr" agent list 2>/dev/null)
+before() {  # the session that the given session came from, if any
+  local s=$1 prev
+  prev=$(find "$config/projects" -maxdepth 2 -name '*.jsonl' -mtime -1 \
+    -exec grep -l -F "\"continuedInSessionId\":\"$s\"" {} + 2>/dev/null | head -1)
+  if [ -n "$prev" ]; then basename "$prev" .jsonl; return; fi
+  jq -r '.forkParentSessionId // empty' "$config/jobs/${s:0:8}/state.json" 2>/dev/null
+}
+s=$(jq -r '.forkParentSessionId // empty' "$CLAUDE_JOB_DIR/state.json" 2>/dev/null)
+found=""
+for _ in 1 2 3 4 5; do
+  [ -n "$s" ] || break
+  found=$(jq -r --arg s "$s" \
+    'first(.result.agents[] | select(.agent_session.value == $s) | "\(.workspace_id) \(.pane_id)") // empty' <<<"$agents" 2>/dev/null)
+  [ -n "$found" ] && break
+  s=$(before "$s")
+done
+if [ -n "$found" ]; then
+  HERDR_WORKSPACE_ID=${found% *}
+  HERDR_PANE_ID=${found#* }
+elif [ -n "${HERDR_PANE_ID:-}" ] && ! "$herdr" pane list 2>/dev/null \
+    | jq -e --arg p "$HERDR_PANE_ID" 'any(.result.panes[]; .pane_id == $p)' >/dev/null 2>&1; then
+  HERDR_PANE_ID=""  # a closed pane: open a tab instead
 fi
 
 layout=${HERDR_FORK_LAYOUT:-${CLAUDE_PLUGIN_OPTION_LAYOUT:-right}}
