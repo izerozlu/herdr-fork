@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# SessionStart hook. Claude Code's /fork starts the fork as a background session; its
+# job folder ($CLAUDE_JOB_DIR) holds parent-transcript.jsonl, which a plain --bg
+# session does not have. Inside Herdr, open the fork in a new tab of the workspace it
+# was forked from, running `claude attach <id>`, so it can be watched and prompted
+# there. Never fails the session: Herdr errors only print a note.
+set -uo pipefail
+input=$(cat)
+[ -n "${HERDR_WORKSPACE_ID:-}" ] || exit 0
+[ -n "${CLAUDE_JOB_DIR:-}" ] && [ -f "$CLAUDE_JOB_DIR/parent-transcript.jsonl" ] || exit 0
+session=$(jq -r '.session_id // empty' <<<"$input")
+cwd=$(jq -r '.cwd // empty' <<<"$input")
+[ -n "$session" ] || exit 0
+short=${session:0:8}
+herdr=${HERDR_BIN_PATH:-herdr}
+
+if ! created=$("$herdr" tab create --workspace "$HERDR_WORKSPACE_ID" --cwd "${cwd:-$PWD}" --label "fork $short" --focus 2>&1); then
+  echo "herdr-forks: could not open a tab for fork $short: $created" >&2
+  exit 0
+fi
+pane=$(jq -r '.result.root_pane.pane_id // empty' <<<"$created")
+if [ -z "$pane" ] || ! "$herdr" pane run "$pane" "claude attach $short" >/dev/null 2>&1; then
+  echo "herdr-forks: opened a tab for fork $short but could not attach; run: claude attach $short" >&2
+fi
+exit 0

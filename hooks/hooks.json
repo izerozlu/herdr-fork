@@ -4,7 +4,11 @@
       {
         "matcher": "Agent|Task",
         "hooks": [
-          { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}\"/scripts/fork-guard", "timeout": 10 }
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/scripts/fork-guard",
+            "timeout": 10
+          }
         ]
       }
     ],
@@ -12,7 +16,16 @@
       {
         "matcher": "*",
         "hooks": [
-          { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}\"/scripts/fork-rule", "timeout": 10 }
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/scripts/fork-rule",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/scripts/fork-tab",
+            "timeout": 10
+          }
         ]
       }
     ]

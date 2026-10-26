@@ -56,6 +56,30 @@ out=$(HERDR_WORKSPACE_ID=w1 "$root/scripts/fork-rule" <<<'{}')
 has "rule inside Herdr" "$(jq -r .hookSpecificOutput.additionalContext <<<"$out")" "herdr-fork"
 check "no rule outside Herdr" "$(HERDR_WORKSPACE_ID= "$root/scripts/fork-rule" <<<'{}')" ""
 
+# fork-tab: a stand-in herdr logs its calls.
+cat > "$tmp/herdr" <<'H'
+#!/usr/bin/env bash
+echo "$*" >> "$HERDR_LOG"
+case "$1 $2" in
+  "tab create") [ -n "${HERDR_FAIL:-}" ] && exit 1; echo '{"result":{"root_pane":{"pane_id":"w1:p9"},"tab":{"tab_id":"w1:t9"}}}' ;;
+esac
+H
+chmod +x "$tmp/herdr"
+export HERDR_LOG=$tmp/herdr.log
+job=$tmp/job; mkdir -p "$job"
+tabhook() { : > "$HERDR_LOG"; HERDR_BIN_PATH=$tmp/herdr HERDR_WORKSPACE_ID=${WS-w1} CLAUDE_JOB_DIR=$job "$root/scripts/fork-tab" <<<'{"session_id":"abcd1234-0000","cwd":"/work/proj"}' 2>&1; }
+tabhook >/dev/null
+check "no tab for plain bg session" "$(cat "$HERDR_LOG")" ""
+touch "$job/parent-transcript.jsonl"
+tabhook >/dev/null
+check "fork opens tab" "$(sed -n 1p "$HERDR_LOG")" "tab create --workspace w1 --cwd /work/proj --label fork abcd1234 --focus"
+check "fork tab attaches" "$(sed -n 2p "$HERDR_LOG")" "pane run w1:p9 claude attach abcd1234"
+WS= tabhook >/dev/null
+check "no tab outside Herdr" "$(cat "$HERDR_LOG")" ""
+out=$(HERDR_FAIL=1 tabhook); code=$?
+check "herdr failure does not fail hook" "$code" 0
+has "herdr failure note" "$out" "could not open a tab"
+
 if command -v claude >/dev/null; then
   out=$(claude plugin validate "$root" 2>&1); code=$?
   check "claude plugin validate" "$code" 0 || printf '%s\n' "$out"
