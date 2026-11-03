@@ -72,6 +72,24 @@ if command -v "$app" >/dev/null 2>&1; then
   fi
 fi
 
+# The fork's HERDR_* and HC_* values come from where the background daemon started,
+# not from where /fork was typed. When the forking session runs in a terminal
+# outside Herdr (its process has no herdr or herdr-core parent), leave the fork alone.
+outside_herdr() {
+  local s=${chain[0]:-} p comm
+  [ -n "$s" ] || return 1
+  p=$(jq -r --arg s "$s" 'select(.sessionId == $s and .kind == "interactive") | .pid' \
+    "$config"/sessions/*.json 2>/dev/null | head -1)
+  [ -n "$p" ] && ps -p "$p" >/dev/null 2>&1 || return 1
+  while [ -n "$p" ] && [ "$p" -gt 1 ]; do
+    comm=$(ps -o comm= -p "$p" 2>/dev/null)
+    case ${comm##*/} in herdr|herdr-core) return 1 ;; esac
+    p=$(ps -o ppid= -p "$p" 2>/dev/null | tr -d ' ')
+  done
+  return 0
+}
+if [ -z "$mode" ] && outside_herdr; then exit 0; fi
+
 if [ -z "$mode" ] && [ -n "${HERDR_WORKSPACE_ID:-}" ]; then
   mode=herdr
   agents=$("$herdr" agent list 2>/dev/null)
