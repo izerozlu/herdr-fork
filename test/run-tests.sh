@@ -4,8 +4,47 @@ set -uo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 pass=0; fail=0
+# Run the same inside Herdr, the Herdr app or neither.
+unset HERDR_WORKSPACE_ID HERDR_PANE_ID HERDR_FORK_LAYOUT HERDR_FORK_ON_CLOSE HC_TERMINAL_ID HC_SCOPE HC_TERMINAL_SOCKET
 check() { if [ "$2" = "$3" ]; then pass=$((pass+1)); else fail=$((fail+1)); printf 'FAIL %s\n  want: %s\n  got:  %s\n' "$1" "$3" "$2"; fi; }
 has() { case "$2" in *"$3"*) pass=$((pass+1)) ;; *) fail=$((fail+1)); printf 'FAIL %s\n  missing: %s\n  in: %s\n' "$1" "$3" "$2" ;; esac; }
+
+# Stand-ins for the Herdr desktop app (herdr-app) and herdr-core (hc). Each logs its
+# calls to $APP_LOG, one call per line. Terminal t1 runs session app-sid (pid 111),
+# t2 is a fork's attach view labeled with fork-sid. APP_FAIL=1 makes `do` fail.
+cat > "$tmp/herdr-app" <<'H'
+#!/usr/bin/env bash
+case $1 in
+  ls) cat <<'J'
+{"spaces":[{"id":"sp1","tabs":[{"id":"tb1","name":"main","terminals":[{"terminal":"t1","pane":"pA1","status":"idle"}]},{"id":"tb2","name":"fx-old","terminals":[{"terminal":"t2","pane":"pA2","status":"working"}]}]},{"id":"sp2","tabs":[{"id":"tb3","name":"taken","terminals":[{"terminal":"t3","pane":"pA3"}]}]}]}
+J
+    ;;
+  do)
+    shift; echo "do $*" >> "$APP_LOG"
+    [ -n "${APP_FAIL:-}" ] && { echo '{"error":"nope"}'; exit 1; }
+    case $1 in
+      pane.split) echo '{"pane":"pN","terminal":"t8"}' ;;
+      tab.new|space.new) echo '{"space":"sp1","tab":"tbN","terminal":"t8"}' ;;
+      *) echo '{"ok":true}' ;;
+    esac ;;
+esac
+H
+cat > "$tmp/hc" <<'H'
+#!/usr/bin/env bash
+case "$1" in
+  ls) echo '{"terminals":[{"address":"t1","state":"live","cwd":"/a"},{"address":"t2","state":"live","cwd":"/b"},{"address":"t3","state":"live","cwd":"/c"}]}' ;;
+  get) case $2 in
+    t1) echo '{"address":"t1","foreground":{"pid":111},"labels":{"herdr.space":"sp1"}}' ;;
+    t2) echo '{"address":"t2","foreground":{"pid":222},"labels":{"herdr.space":"sp1","herdr-fork.session":"fork-sid"}}' ;;
+    t3) echo '{"address":"t3","labels":{"herdr.space":"sp2"}}' ;;
+  esac ;;
+  label) echo "hc $*" >> "$APP_LOG" ;;
+esac
+H
+chmod +x "$tmp/herdr-app" "$tmp/hc"
+export HERDR_APP_BIN=$tmp/herdr-app HC_BIN=$tmp/hc APP_LOG=$tmp/app.log
+mkdir -p "$tmp/claude/sessions"
+echo '{"pid":111,"sessionId":"app-sid","kind":"interactive"}' > "$tmp/claude/sessions/111.json"
 
 # Stand-in herdr for herdr-fork: logs each call (one argument per line, then ---)
 # and answers like Herdr. FORK_START=fail|notready|trust changes `agent start`.
@@ -205,6 +244,63 @@ check "no tab outside Herdr" "$(cat "$HERDR_LOG")" ""
 out=$(HERDR_FAIL=1 tabhook); code=$?
 check "herdr failure does not fail hook" "$code" 0
 has "herdr failure note" "$out" "could not open a right pane"
+
+# fork-open in the desktop app.
+apphook() { : > "$APP_LOG"; : > "$HERDR_LOG"; HC_TERMINAL_ID=${HCT-} HERDR_BIN_PATH=$tmp/herdr HERDR_WORKSPACE_ID=${WS-} HERDR_FORK_LAYOUT=${LAYOUT-} CLAUDE_JOB_DIR=$job "$root/scripts/fork-open" <<<'{"session_id":"abcd1234-0000","cwd":"/work/proj"}' 2>&1; }
+argv="[\"env\",\"HERDR_FORK_ON_CLOSE=stop\",\"$root/scripts/fork-attach\",\"abcd1234\"]"
+echo '{"forkParentSessionId":"app-sid","name":"main ⑂ try it"}' > "$job/state.json"
+apphook >/dev/null
+check "app splits forking pane" "$(sed -n 1p "$APP_LOG")" "do pane.split --direction right --pane pA1 --argv $argv"
+check "app focuses fork pane" "$(sed -n 2p "$APP_LOG")" "do pane.focus --pane pN"
+check "app labels fork terminal" "$(sed -n 3p "$APP_LOG")" "hc label t8 herdr-fork.session=abcd1234-0000"
+check "app does not call herdr" "$(cat "$HERDR_LOG")" ""
+LAYOUT=up apphook >/dev/null
+check "app layout up splits down" "$(sed -n 1p "$APP_LOG")" "do pane.split --direction down --pane pA1 --argv $argv"
+check "app layout up swaps" "$(sed -n 3p "$APP_LOG")" "do pane.swap --direction up"
+LAYOUT=tab apphook >/dev/null
+check "app layout tab" "$(sed -n 1p "$APP_LOG")" "do tab.new --name ⑂ try it --space sp1 --folder /work/proj --argv $argv"
+LAYOUT=workspace apphook >/dev/null
+check "app layout workspace" "$(sed -n 1p "$APP_LOG")" "do space.new --name ⑂ try it --folder /work/proj --argv $argv"
+WS=w1 apphook >/dev/null
+check "app pane beats stale HERDR env" "$(sed -n 1p "$APP_LOG")" "do pane.split --direction right --pane pA1 --argv $argv"
+echo '{"forkParentSessionId":"fork-sid"}' > "$job/state.json"
+apphook >/dev/null
+check "app finds a fork's attach pane" "$(sed -n 1p "$APP_LOG")" "do pane.split --direction right --pane pA2 --argv $argv"
+echo '{"forkParentSessionId":"gone-sid"}' > "$job/state.json"
+HCT=t5 apphook >/dev/null
+check "app unknown parent splits focused" "$(sed -n 1p "$APP_LOG")" "do pane.split --direction right --argv $argv"
+apphook >/dev/null
+check "app unknown parent outside app" "$(cat "$APP_LOG")" ""
+echo '{"forkParentSessionId":"app-sid"}' > "$job/state.json"
+out=$(APP_FAIL=1 apphook); code=$?
+check "app failure does not fail hook" "$code" 0
+has "app failure note" "$out" "could not open a right pane"
+rm "$job/state.json"
+
+# herdr-fork in the desktop app: this session runs in terminal t1, space sp1.
+appfork() { : > "$APP_LOG"; (cd "$proj" && HERDR_WORKSPACE_ID= HC_TERMINAL_ID=t1 CLAUDE_CODE_SESSION_ID=sid-1 "$root/bin/herdr-fork" "$@"); }
+out=$(appfork fx "fix the docs"); code=$?
+check "app fork exits 0" "$code" 0
+has "app fork opens tab" "$(cat "$APP_LOG")" "do tab.new --name fx --space sp1 --folder $proj --argv [\"claude\",\"--permission-mode\",\"auto\",\"--resume\",\"sid-1\",\"--fork-session\"] --task You are a fork"
+has "app fork task" "$(cat "$APP_LOG")" "fix the docs"
+has "app fork prints summary" "$out" "fork=fx session=sid-1 tab=tbN terminal=t8"
+err=$(appfork taken t 2>&1); code=$?
+check "app name in use refused" "$code" 2; check "app name in use opens no tab" "$(cat "$APP_LOG")" ""
+check "app list shows this space" "$(appfork list)" "$(printf 'fx-old\ttb2\tworking\t/b')"
+out=$(appfork close fx-old); code=$?
+check "app close exits 0" "$code" 0; check "app close closes tab" "$(cat "$APP_LOG")" "do tab.close --id tb2 --confirmed true"
+err=$(appfork close taken 2>&1); code=$?
+check "app close other space refused" "$code" 2
+err=$(appfork close main 2>&1); code=$?
+check "app close own tab refused" "$code" 2
+err=$(appfork close nobody 2>&1); code=$?
+check "app close unknown refused" "$code" 2
+err=$(cd "$proj" && HERDR_WORKSPACE_ID= HC_TERMINAL_ID= "$root/bin/herdr-fork" fx t 2>&1); code=$?
+check "outside both refused" "$code" 2
+guard2=$(HERDR_WORKSPACE_ID= HC_TERMINAL_ID=t1 "$root/scripts/fork-guard" <<<'{"tool_input":{"subagent_type":"fork"}}')
+check "guard denies fork in app" "$(jq -r .hookSpecificOutput.permissionDecision <<<"$guard2")" deny
+out=$(HERDR_WORKSPACE_ID= HC_TERMINAL_ID=t1 "$root/scripts/fork-rule" <<<'{}')
+has "rule in app" "$(jq -r .hookSpecificOutput.additionalContext <<<"$out")" "herdr-fork"
 
 # fork-attach: a stand-in claude logs its calls; attach waits until it is signalled.
 cat > "$tmp/claude-bin" <<'C'

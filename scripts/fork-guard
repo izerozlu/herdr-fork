@@ -4,7 +4,7 @@
 # opens in its own tab. Other agent types and sessions outside Herdr are left alone.
 set -euo pipefail
 input=$(cat)
-[ -n "${HERDR_WORKSPACE_ID:-}" ] || exit 0
+[ -n "${HERDR_WORKSPACE_ID:-}${HC_TERMINAL_ID:-}" ] || exit 0
 [ "$(jq -r '.tool_input.subagent_type // empty' <<<"$input")" = fork ] || exit 0
 jq -n '{hookSpecificOutput: {
   hookEventName: "PreToolUse",
