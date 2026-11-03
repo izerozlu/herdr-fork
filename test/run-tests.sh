@@ -220,6 +220,12 @@ FOCUSED=true tabhook >/dev/null
 check "unknown parent uses focused pane" "$(sed -n 1p "$HERDR_LOG")" "pane split w6:p2 --direction right --cwd /work/proj --focus"
 FOCUSED=true LAYOUT=tab tabhook >/dev/null
 check "unknown parent uses focused workspace" "$(sed -n 1p "$HERDR_LOG")" "tab create --workspace w6 --cwd /work/proj --label fork abcd1234 --focus"
+# A forking session in a plain terminal: pid 1 has no herdr parent.
+echo '{"pid":1,"sessionId":"term-sid","kind":"interactive"}' > "$tmp/claude/sessions/1.json"
+echo '{"forkParentSessionId":"term-sid"}' > "$job/state.json"
+FOCUSED=true tabhook >/dev/null
+check "no pane when forked outside Herdr" "$(cat "$HERDR_LOG")" ""
+rm "$tmp/claude/sessions/1.json"
 echo '{"forkParentSessionId":"parent-sid"}' > "$job/state.json"
 FOCUSED=true tabhook >/dev/null
 check "known parent beats focused pane" "$(sed -n 1p "$HERDR_LOG")" "pane split w3:p4 --direction right --cwd /work/proj --focus"
@@ -271,6 +277,11 @@ HCT=t5 apphook >/dev/null
 check "app unknown parent splits focused" "$(sed -n 1p "$APP_LOG")" "do pane.split --direction right --argv $argv"
 apphook >/dev/null
 check "app unknown parent outside app" "$(cat "$APP_LOG")" ""
+echo '{"pid":1,"sessionId":"term-sid","kind":"interactive"}' > "$tmp/claude/sessions/1.json"
+echo '{"forkParentSessionId":"term-sid"}' > "$job/state.json"
+HCT=t5 apphook >/dev/null
+check "no app pane when forked outside Herdr" "$(cat "$APP_LOG")" ""
+rm "$tmp/claude/sessions/1.json"
 echo '{"forkParentSessionId":"app-sid"}' > "$job/state.json"
 out=$(APP_FAIL=1 apphook); code=$?
 check "app failure does not fail hook" "$code" 0
