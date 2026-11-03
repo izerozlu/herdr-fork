@@ -15,8 +15,10 @@ The plugin's tab handling was inspired by [herdr-lock](https://github.com/aalvar
 
 ## Requirements
 
-- Claude Code with plugin support, run inside a Herdr pane
+- Claude Code with plugin support, run inside a Herdr pane: the Herdr terminal app (`herdr`) or the Herdr desktop app (`herdr-app` and `hc`)
 - `jq`
+
+In the desktop app, a workspace is a space, and a fork made with the `herdr-fork` command is known by its tab name. The app sends the fork its task when it is ready, so exit status 3 does not occur there.
 
 ## Install
 

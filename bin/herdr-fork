@@ -9,26 +9,70 @@
 # herdr-fork close <name>
 #   Close a fork's tab in the caller's workspace.
 #
+# In the Herdr desktop app (HC_TERMINAL_ID is set), a workspace is a space, the
+# fork's name is its tab's name, and the app sends the task once the fork is ready.
+#
 # Exit status: 0 ok, 1 Herdr error, 2 refused (bad arguments, not in Herdr or a
 # Claude session, name in use, folder outside the caller's), 3 the fork started but
 # is blocked at startup (e.g. a folder-trust prompt) and has not received its task.
 set -euo pipefail
 herdr=${HERDR_BIN_PATH:-herdr}
+app=${HERDR_APP_BIN:-herdr-app}
+hc=${HC_BIN:-hc}
 
-if [ -z "${HERDR_WORKSPACE_ID:-}" ]; then
-  echo "herdr-fork: this session does not run inside Herdr (HERDR_WORKSPACE_ID is not set)" >&2
+if [ -n "${HERDR_WORKSPACE_ID:-}" ]; then
+  mode=herdr
+elif [ -n "${HC_TERMINAL_ID:-}" ]; then
+  mode=app
+else
+  echo "herdr-fork: this session does not run inside Herdr (neither HERDR_WORKSPACE_ID nor HC_TERMINAL_ID is set)" >&2
   exit 2
 fi
 
 agents_json() { "$herdr" agent list | jq -c '.result.agents'; }
+# The desktop app's tabs, one per line: {space, tab, name, mine, terminals}.
+tabs_json() {
+  "$app" ls | jq -c --arg me "$HC_TERMINAL_ID" '.spaces[] | .id as $space | .tabs[]
+    | {space: $space, tab: .id, name: (if .named == false then null else .name end), mine: any(.terminals[]; .terminal == $me), terminals}'
+}
+if [ "$mode" = app ]; then
+  my_space=$("$app" ls | jq -r --arg me "$HC_TERMINAL_ID" \
+    'first(.spaces[] | select(any(.tabs[].terminals[]; .terminal == $me)) | .id) // empty')
+  if [ -z "$my_space" ]; then
+    echo "herdr-fork: terminal $HC_TERMINAL_ID is not in a Herdr app space" >&2
+    exit 1
+  fi
+fi
 
-case "${1:-}" in
-  list)
+case "${1:-}:$mode" in
+  list:app)
+    cwds=$("$hc" ls --json | jq -c '[.terminals[]? | {key: .address, value: .cwd}] | from_entries')
+    tabs_json | jq -r --arg ws "$my_space" --argjson cwd "$cwds" '
+      select(.space == $ws and (.mine | not) and .name != null)
+      | "\(.name)\t\(.tab)\t\(.terminals[0].status // "-")\t\($cwd[.terminals[0].terminal] // "-")"'
+    exit 0 ;;
+  close:app)
+    [ $# -eq 2 ] || { echo "usage: herdr-fork close <name>" >&2; exit 2; }
+    found=$(tabs_json | jq -c --arg n "$2" 'select(.name == $n)' | head -1)
+    if [ -z "$found" ]; then
+      echo "herdr-fork: no tab named $2" >&2; exit 2
+    fi
+    if [ "$(jq -r .space <<<"$found")" != "$my_space" ]; then
+      echo "herdr-fork: $2 is in another space; only tabs in this one can be closed here" >&2; exit 2
+    fi
+    if [ "$(jq -r .mine <<<"$found")" = true ]; then
+      echo "herdr-fork: $2 is your own tab; refusing to close it" >&2; exit 2
+    fi
+    tab=$(jq -r .tab <<<"$found")
+    "$app" do tab.close --id "$tab" --confirmed true >/dev/null
+    echo "closed $2 ($tab)"
+    exit 0 ;;
+  list:*)
     agents_json | jq -r --arg ws "$HERDR_WORKSPACE_ID" --arg me "${HERDR_PANE_ID:-}" '
       .[] | select(.workspace_id == $ws and .pane_id != $me)
       | "\(.name)\t\(.tab_id)\t\(.agent_status // "-")\t\(.cwd // "-")"'
     exit 0 ;;
-  close)
+  close:*)
     [ $# -eq 2 ] || { echo "usage: herdr-fork close <name>" >&2; exit 2; }
     found=$(agents_json | jq -c --arg n "$2" '.[] | select(.name == $n)')
     if [ -z "$found" ]; then
@@ -82,7 +126,12 @@ case "$dir/" in
   "$here/"*) ;;
   *) echo "herdr-fork: -C $dir is outside the caller's folder ($here)" >&2; exit 2 ;;
 esac
-if [ -n "$(agents_json | jq -r --arg n "$name" '.[] | select(.name == $n) | .name')" ]; then
+if [ "$mode" = app ]; then
+  in_use=$(tabs_json | jq -r --arg n "$name" 'select(.name == $n) | .name')
+else
+  in_use=$(agents_json | jq -r --arg n "$name" '.[] | select(.name == $n) | .name')
+fi
+if [ -n "$in_use" ]; then
   echo "herdr-fork: the name $name is already in use by a Herdr agent (names are unique across all workspaces); pick another" >&2
   exit 2
 fi
@@ -94,6 +143,16 @@ task="You are a fork of the conversation above, running in your own Herdr tab na
 $task
 
 When you are completely done, write a full report (what you did, files touched, how you verified it) to $report. Keep your terminal reply to a short summary."
+
+if [ "$mode" = app ]; then
+  # $extra is deliberately word-split into claude args
+  argv=$(printf "%s\0" claude $extra --resume "$session" --fork-session | jq -Rsc 'split("\u0000")[:-1]')
+  created=$("$app" do tab.new --name "$name" --space "$my_space" --folder "$dir" --argv "$argv" --task "$task") || exit 1
+  tab=$(jq -r .tab <<<"$created")
+  terminal=$(jq -r .terminal <<<"$created")
+  echo "fork=$name session=$session tab=$tab terminal=$terminal cwd=$dir report=$report"
+  exit 0
+fi
 
 created=$("$herdr" tab create --workspace "$HERDR_WORKSPACE_ID" --cwd "$dir" --label "$name" --no-focus) || exit 1
 pane=$(jq -r '.result.root_pane.pane_id' <<<"$created")

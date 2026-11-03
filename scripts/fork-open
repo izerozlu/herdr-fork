@@ -3,18 +3,19 @@
 # job folder ($CLAUDE_JOB_DIR) holds parent-transcript.jsonl, which a plain --bg
 # session does not have, and state.json names the forking session. Inside Herdr,
 # open the fork next to the pane it was forked from, running `claude attach <id>`,
-# so it can be watched and prompted there.
+# so it can be watched and prompted there. Works with the Herdr terminal app
+# (`herdr`) and the Herdr desktop app (`herdr-app`, with herdr-core `hc`).
 #
 # Where it opens: HERDR_FORK_LAYOUT, else the plugin's `layout` option, else right.
 #   right, left, down, up  split the forking pane on that side
-#   tab                    new tab in the forking workspace
-#   workspace              new workspace
+#   tab                    new tab in the forking workspace (space in the desktop app)
+#   workspace              new workspace (space in the desktop app)
 # When Herdr closes the pane, fork-attach stops the fork (see HERDR_FORK_ON_CLOSE or
 # the plugin's onClose option: stop, remove or keep).
 # Never fails the session: Herdr errors only print a note.
 set -uo pipefail
 input=$(cat)
-[ -n "${HERDR_WORKSPACE_ID:-}" ] || exit 0
+[ -n "${HERDR_WORKSPACE_ID:-}${HC_TERMINAL_ID:-}" ] || command -v "${HERDR_APP_BIN:-herdr-app}" >/dev/null || exit 0
 [ -n "${CLAUDE_JOB_DIR:-}" ] && [ -f "$CLAUDE_JOB_DIR/parent-transcript.jsonl" ] || exit 0
 session=$(jq -r '.session_id // empty' <<<"$input")
 cwd=$(jq -r '.cwd // empty' <<<"$input")
@@ -22,6 +23,8 @@ cwd=$(jq -r '.cwd // empty' <<<"$input")
 short=${session:0:8}
 cwd=${cwd:-$PWD}
 herdr=${HERDR_BIN_PATH:-herdr}
+app=${HERDR_APP_BIN:-herdr-app}
+hc=${HC_BIN:-hc}
 root=$(cd "$(dirname "$0")/.." && pwd)
 
 # /fork can hand the fork to a spare session that started earlier, so its
@@ -31,7 +34,6 @@ root=$(cd "$(dirname "$0")/.." && pwd)
 # session that continued in it (its transcript says "continued-in"), else to its
 # own fork parent. Keep the env values when nothing is found.
 config=${CLAUDE_CONFIG_DIR:-$HOME/.claude}
-agents=$("$herdr" agent list 2>/dev/null)
 before() {  # the session that the given session came from, if any
   local s=$1 prev
   prev=$(find "$config/projects" -maxdepth 2 -name '*.jsonl' -mtime -1 \
@@ -39,28 +41,66 @@ before() {  # the session that the given session came from, if any
   if [ -n "$prev" ]; then basename "$prev" .jsonl; return; fi
   jq -r '.forkParentSessionId // empty' "$config/jobs/${s:0:8}/state.json" 2>/dev/null
 }
+chain=()
 s=$(jq -r '.forkParentSessionId // empty' "$CLAUDE_JOB_DIR/state.json" 2>/dev/null)
-found=""
 for _ in 1 2 3 4 5; do
   [ -n "$s" ] || break
-  found=$(jq -r --arg s "$s" \
-    'first(.result.agents[] | select(.agent_session.value == $s) | "\(.workspace_id) \(.pane_id)") // empty' <<<"$agents" 2>/dev/null)
-  [ -n "$found" ] && break
+  chain+=("$s")
   s=$(before "$s")
 done
-# Herdr can also know a pane by an older session (for example after a resume), so
-# the walk can miss. /fork was just typed, so then take Herdr's focused pane.
-panes=$("$herdr" pane list 2>/dev/null)
-if [ -z "$found" ]; then
-  found=$(jq -r 'first(.result.panes[] | select(.focused) | "\(.workspace_id) \(.pane_id)") // empty' <<<"$panes" 2>/dev/null)
+
+# The desktop app runs every terminal in herdr-core (hc). A terminal is a session's
+# when its foreground program is that session's process (Claude Code writes
+# sessions/<pid>.json), or when fork-open labeled it with the session (the attach
+# view of a fork). Look there first: a spare session can carry stale HERDR_* values.
+mode="" found=""
+if command -v "$app" >/dev/null 2>&1; then
+  terminals=$(for t in $("$hc" ls --json 2>/dev/null | jq -r '.terminals[]? | select(.state == "live") | .address' 2>/dev/null); do
+    "$hc" get "$t" --json 2>/dev/null
+  done | jq -sc 'map({address, pid: (.foreground.pid // null), session: .labels["herdr-fork.session"], space: .labels["herdr.space"]})' 2>/dev/null)
+  for s in ${chain[@]+"${chain[@]}"}; do
+    pid=$(jq -r --arg s "$s" 'select(.sessionId == $s) | .pid' "$config"/sessions/*.json 2>/dev/null | head -1)
+    found=$(jq -r --arg s "$s" --arg p "${pid:-none}" \
+      'first(.[] | select(.session == $s or (.pid | tostring) == $p) | "\(.space) \(.address)") // empty' <<<"$terminals" 2>/dev/null)
+    [ -n "$found" ] && break
+  done
+  if [ -n "$found" ]; then
+    mode=app
+    app_space=${found% *}
+    app_pane=$("$app" ls 2>/dev/null | jq -r --arg t "${found#* }" \
+      'first(.spaces[].tabs[].terminals[] | select(.terminal == $t) | .pane) // empty' 2>/dev/null)
+  fi
 fi
-if [ -n "$found" ]; then
-  HERDR_WORKSPACE_ID=${found% *}
-  HERDR_PANE_ID=${found#* }
-elif [ -n "${HERDR_PANE_ID:-}" ] && ! jq -e --arg p "$HERDR_PANE_ID" \
-    'any(.result.panes[]; .pane_id == $p)' <<<"$panes" >/dev/null 2>&1; then
-  HERDR_PANE_ID=""  # a closed pane: open a tab instead
+
+if [ -z "$mode" ] && [ -n "${HERDR_WORKSPACE_ID:-}" ]; then
+  mode=herdr
+  agents=$("$herdr" agent list 2>/dev/null)
+  found=""
+  for s in ${chain[@]+"${chain[@]}"}; do
+    found=$(jq -r --arg s "$s" \
+      'first(.result.agents[] | select(.agent_session.value == $s) | "\(.workspace_id) \(.pane_id)") // empty' <<<"$agents" 2>/dev/null)
+    [ -n "$found" ] && break
+  done
+  # Herdr can also know a pane by an older session (for example after a resume), so
+  # the walk can miss. /fork was just typed, so then take Herdr's focused pane.
+  panes=$("$herdr" pane list 2>/dev/null)
+  if [ -z "$found" ]; then
+    found=$(jq -r 'first(.result.panes[] | select(.focused) | "\(.workspace_id) \(.pane_id)") // empty' <<<"$panes" 2>/dev/null)
+  fi
+  if [ -n "$found" ]; then
+    HERDR_WORKSPACE_ID=${found% *}
+    HERDR_PANE_ID=${found#* }
+  elif [ -n "${HERDR_PANE_ID:-}" ] && ! jq -e --arg p "$HERDR_PANE_ID" \
+      'any(.result.panes[]; .pane_id == $p)' <<<"$panes" >/dev/null 2>&1; then
+    HERDR_PANE_ID=""  # a closed pane: open a tab instead
+  fi
 fi
+# In the desktop app but the forking terminal is not found: /fork was just typed,
+# so the app's focused pane and selected space are the forking ones.
+if [ -z "$mode" ] && [ -n "${HC_TERMINAL_ID:-}" ]; then
+  mode=app app_space="" app_pane=""
+fi
+[ -n "$mode" ] || exit 0
 
 # Label the fork's pane (and tab or workspace) with the fork's name. /fork names it
 # "<forking session's name> ⑂ <the /fork text>"; keep only "⑂ <text>" and cut it.
@@ -77,16 +117,44 @@ case $on_close in
   stop|remove|keep) ;;
   *) echo "herdr-fork: onClose $on_close is not stop, remove or keep; using stop" >&2; on_close=stop ;;
 esac
-# A split needs the forking pane; without it, fall back to a tab.
-if [ -z "${HERDR_PANE_ID:-}" ]; then
-  case $layout in right|left|down|up) layout=tab ;; esac
-fi
-
 # Herdr splits only right or down; left and up split, then swap the two panes.
 case $layout in
   right|left) direction=right ;;
   down|up) direction=down ;;
 esac
+
+if [ "$mode" = app ]; then
+  argv=$(jq -nc --arg c "$on_close" --arg a "$root/scripts/fork-attach" --arg s "$short" \
+    '["env", "HERDR_FORK_ON_CLOSE=\($c)", $a, $s]')
+  case $layout in
+    tab) created=$("$app" do tab.new --name "$label" ${app_space:+--space "$app_space"} --folder "$cwd" --argv "$argv" 2>&1); rc=$? ;;
+    workspace) created=$("$app" do space.new --name "$label" --folder "$cwd" --argv "$argv" 2>&1); rc=$? ;;
+    # No pane found: the app splits its focused pane.
+    *) created=$("$app" do pane.split --direction "$direction" ${app_pane:+--pane "$app_pane"} --argv "$argv" 2>&1); rc=$? ;;
+  esac
+  if [ "$rc" -ne 0 ]; then
+    echo "herdr-fork: could not open a $layout pane for fork $short: $created" >&2
+    exit 0
+  fi
+  pane=$(jq -r '.pane // empty' <<<"$created" 2>/dev/null)
+  terminal=$(jq -r '.terminal // empty' <<<"$created" 2>/dev/null)
+  if [ -n "$pane" ]; then
+    "$app" do pane.focus --pane "$pane" >/dev/null 2>&1 || true
+    if [ "$layout" = left ] || [ "$layout" = up ]; then
+      "$app" do pane.swap --direction "$layout" >/dev/null 2>&1 \
+        || echo "herdr-fork: fork $short opened $direction instead of $layout (the swap failed)" >&2
+    fi
+  fi
+  # Mark the terminal with the fork's session, so a /fork typed in it finds it.
+  [ -n "$terminal" ] && "$hc" label "$terminal" "herdr-fork.session=$session" >/dev/null 2>&1
+  exit 0
+fi
+
+# A split needs the forking pane; without it, fall back to a tab.
+if [ -z "${HERDR_PANE_ID:-}" ]; then
+  case $layout in right|left|down|up) layout=tab ;; esac
+fi
+
 case $layout in
   tab)
     created=$("$herdr" tab create --workspace "$HERDR_WORKSPACE_ID" --cwd "$cwd" --label "$label" --focus 2>&1); rc=$?
