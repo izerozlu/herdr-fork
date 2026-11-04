@@ -11,12 +11,13 @@ has() { case "$2" in *"$3"*) pass=$((pass+1)) ;; *) fail=$((fail+1)); printf 'FA
 
 # Stand-ins for the Herdr desktop app (herdr-app) and herdr-core (hc). Each logs its
 # calls to $APP_LOG, one call per line. Terminal t1 runs session app-sid (pid 111),
-# t2 is a fork's attach view labeled with fork-sid. APP_FAIL=1 makes `do` fail.
+# t2 is a fork's attach view labeled with fork-sid, alone in its tab, and t4 is a
+# /fork pane split into t1's tab. APP_FAIL=1 makes `do` fail.
 cat > "$tmp/herdr-app" <<'H'
 #!/usr/bin/env bash
 case $1 in
   ls) cat <<'J'
-{"spaces":[{"id":"sp1","tabs":[{"id":"tb1","name":"main","terminals":[{"terminal":"t1","pane":"pA1","status":"idle"}]},{"id":"tb2","name":"fx-old","terminals":[{"terminal":"t2","pane":"pA2","status":"working"}]}]},{"id":"sp2","tabs":[{"id":"tb3","name":"taken","terminals":[{"terminal":"t3","pane":"pA3"}]}]}]}
+{"spaces":[{"id":"sp1","tabs":[{"id":"tb1","name":"main","terminals":[{"terminal":"t1","pane":"pA1","status":"idle"},{"terminal":"t4","pane":"pA4","status":"working"}]},{"id":"tb2","name":"fx-old","terminals":[{"terminal":"t2","pane":"pA2","status":"working"}]}]},{"id":"sp2","tabs":[{"id":"tb3","name":"taken","terminals":[{"terminal":"t3","pane":"pA3"}]}]}]}
 J
     ;;
   do)
@@ -32,11 +33,12 @@ H
 cat > "$tmp/hc" <<'H'
 #!/usr/bin/env bash
 case "$1" in
-  ls) echo '{"terminals":[{"address":"t1","state":"live","cwd":"/a"},{"address":"t2","state":"live","cwd":"/b"},{"address":"t3","state":"live","cwd":"/c"}]}' ;;
+  ls) echo '{"terminals":[{"address":"t1","state":"live","cwd":"/a"},{"address":"t2","state":"live","cwd":"/b"},{"address":"t3","state":"live","cwd":"/c"},{"address":"t4","state":"live","cwd":"/d"}]}' ;;
   get) case $2 in
     t1) echo '{"address":"t1","foreground":{"pid":111},"labels":{"herdr.space":"sp1"}}' ;;
     t2) echo '{"address":"t2","foreground":{"pid":222},"labels":{"herdr.space":"sp1","herdr-fork.session":"fork-sid"}}' ;;
     t3) echo '{"address":"t3","labels":{"herdr.space":"sp2"}}' ;;
+    t4) echo '{"address":"t4","labels":{"herdr.space":"sp1","herdr-fork.session":"feed1234-0000"}}' ;;
   esac ;;
   label) echo "hc $*" >> "$APP_LOG" ;;
 esac
@@ -297,7 +299,18 @@ has "app fork task" "$(cat "$APP_LOG")" "fix the docs"
 has "app fork prints summary" "$out" "fork=fx session=sid-1 tab=tbN terminal=t8"
 err=$(appfork taken t 2>&1); code=$?
 check "app name in use refused" "$code" 2; check "app name in use opens no tab" "$(cat "$APP_LOG")" ""
-check "app list shows this space" "$(appfork list)" "$(printf 'fx-old\ttb2\tworking\t/b')"
+mkdir -p "$tmp/claude/jobs/feed1234"
+echo '{"name":"main ⑂ check the logs"}' > "$tmp/claude/jobs/feed1234/state.json"
+check "app list shows this space" "$(appfork list)" "$(printf '⑂ check the logs\tt4\tworking\t/d\nfx-old\ttb2\tworking\t/b')"
+out=$(appfork close "⑂ check the logs"); code=$?
+check "app close fork pane exits 0" "$code" 0; check "app close fork pane closes pane" "$(cat "$APP_LOG")" "do pane.close --pane pA4"
+appfork close t4 >/dev/null
+check "app close fork pane by id" "$(cat "$APP_LOG")" "do pane.close --pane pA4"
+err=$(cd "$proj" && HERDR_WORKSPACE_ID= HC_TERMINAL_ID=t4 "$root/bin/herdr-fork" close t4 2>&1); code=$?
+check "app close own fork pane refused" "$code" 2
+echo '{"name":"main ⑂"}' > "$tmp/claude/jobs/feed1234/state.json"
+has "app list names a /fork with no text by its id" "$(appfork list)" "$(printf 'fork feed1234\tt4')"
+rm -r "$tmp/claude/jobs/feed1234"
 out=$(appfork close fx-old); code=$?
 check "app close exits 0" "$code" 0; check "app close closes tab" "$(cat "$APP_LOG")" "do tab.close --id tb2 --confirmed true"
 err=$(appfork close taken 2>&1); code=$?

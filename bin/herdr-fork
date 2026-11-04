@@ -11,6 +11,8 @@
 #
 # In the Herdr desktop app (HC_TERMINAL_ID is set), a workspace is a space, the
 # fork's name is its tab's name, and the app sends the task once the fork is ready.
+# There, list also shows the panes of /fork forks (also those in the caller's tab),
+# named "⑂ <the /fork text>", and close <name or id> closes only such a pane.
 #
 # Exit status: 0 ok, 1 Herdr error, 2 refused (bad arguments, not in Herdr or a
 # Claude session, name in use, folder outside the caller's), 3 the fork started but
@@ -35,6 +37,32 @@ tabs_json() {
   "$app" ls | jq -c --arg me "$HC_TERMINAL_ID" '.spaces[] | .id as $space | .tabs[]
     | {space: $space, tab: .id, name: (if .named == false then null else .name end), mine: any(.terminals[]; .terminal == $me), terminals}'
 }
+# The desktop app's tabs and /fork panes, one per line: {kind, space, id, pane, name,
+# mine, terminal, status}. fork-open labels a /fork pane's terminal with its session;
+# Claude Code keeps the /fork name in jobs/<short id>/state.json. A named tab that
+# holds only a /fork pane is listed once, as the tab.
+entries_json() {
+  local sessions names
+  sessions=$(for t in $("$hc" ls --json | jq -r '.terminals[]?.address'); do "$hc" get "$t" --json 2>/dev/null; done \
+    | jq -sc 'map(select(.labels["herdr-fork.session"]) | {key: .address, value: .labels["herdr-fork.session"]}) | from_entries')
+  names=$(jq -r '.[]' <<<"$sessions" | while read -r s; do
+    n=$(jq -r '.name // empty' "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/jobs/${s:0:8}/state.json" 2>/dev/null)
+    # Same label as fork-open: keep only "⑂ <text>" and cut it. A /fork with no text
+    # is called by its short id.
+    case $n in *⑂) n="" ;; esac
+    printf '%s\t%s\n' "$s" "$(printf '%s' "${n:-fork ${s:0:8}}" | perl -CS -pe 's/^.*?\x{2442}\s*/\x{2442} /; s/^(.{40}).+$/$1\x{2026}/s; s/\s+\x{2026}$/\x{2026}/')"
+  done | jq -Rsc 'split("\n") | map(select(length > 0) | split("\t") | {key: .[0], value: .[1]}) | from_entries')
+  "$app" ls | jq -c --arg me "$HC_TERMINAL_ID" --argjson ses "$sessions" --argjson names "$names" '
+    .spaces[] | .id as $space | .tabs[]
+    | (.terminals | map(select($ses[.terminal] | not))) as $rest
+    | (.named != false and (any(.terminals[]; .terminal == $me) | not)
+       and ($rest != [] or (.terminals | length) == 1)) as $tabrow
+    | (if $tabrow then {kind: "tab", space: $space, id, pane: null, name, mine: false,
+         terminal: ($rest[0] // .terminals[0]).terminal, status: ($rest[0] // .terminals[0]).status} else empty end),
+      (.terminals[] | select($ses[.terminal] and ($tabrow and $rest == [] | not))
+       | {kind: "pane", space: $space, id: .terminal, pane, name: $names[$ses[.terminal]],
+          mine: (.terminal == $me), terminal, status})'
+}
 if [ "$mode" = app ]; then
   my_space=$("$app" ls | jq -r --arg me "$HC_TERMINAL_ID" \
     'first(.spaces[] | select(any(.tabs[].terminals[]; .terminal == $me)) | .id) // empty')
@@ -47,25 +75,33 @@ fi
 case "${1:-}:$mode" in
   list:app)
     cwds=$("$hc" ls --json | jq -c '[.terminals[]? | {key: .address, value: .cwd}] | from_entries')
-    tabs_json | jq -r --arg ws "$my_space" --argjson cwd "$cwds" '
-      select(.space == $ws and (.mine | not) and .name != null)
-      | "\(.name)\t\(.tab)\t\(.terminals[0].status // "-")\t\($cwd[.terminals[0].terminal] // "-")"'
+    entries_json | jq -r --arg ws "$my_space" --argjson cwd "$cwds" '
+      select(.space == $ws and (.mine | not))
+      | "\(.name)\t\(.id)\t\(.status // "-")\t\($cwd[.terminal] // "-")"'
     exit 0 ;;
   close:app)
     [ $# -eq 2 ] || { echo "usage: herdr-fork close <name>" >&2; exit 2; }
-    found=$(tabs_json | jq -c --arg n "$2" 'select(.name == $n)' | head -1)
+    # Own tab first, so the caller's tab name is refused below and not "not found".
+    found=$({ tabs_json | jq -c --arg n "$2" 'select(.name == $n and .mine) | {kind: "tab", space, id: .tab, mine}'
+      entries_json | jq -c --arg n "$2" 'select(.name == $n or (.kind == "pane" and .id == $n))'; } | head -1)
     if [ -z "$found" ]; then
-      echo "herdr-fork: no tab named $2" >&2; exit 2
+      echo "herdr-fork: no tab or fork pane named $2" >&2; exit 2
     fi
     if [ "$(jq -r .space <<<"$found")" != "$my_space" ]; then
-      echo "herdr-fork: $2 is in another space; only tabs in this one can be closed here" >&2; exit 2
+      echo "herdr-fork: $2 is in another space; only tabs and panes in this one can be closed here" >&2; exit 2
     fi
     if [ "$(jq -r .mine <<<"$found")" = true ]; then
-      echo "herdr-fork: $2 is your own tab; refusing to close it" >&2; exit 2
+      echo "herdr-fork: $2 is your own tab or pane; refusing to close it" >&2; exit 2
     fi
-    tab=$(jq -r .tab <<<"$found")
-    "$app" do tab.close --id "$tab" --confirmed true >/dev/null
-    echo "closed $2 ($tab)"
+    if [ "$(jq -r .kind <<<"$found")" = pane ]; then
+      pane=$(jq -r .pane <<<"$found")
+      "$app" do pane.close --pane "$pane" >/dev/null
+      echo "closed $2 ($pane)"
+    else
+      tab=$(jq -r .id <<<"$found")
+      "$app" do tab.close --id "$tab" --confirmed true >/dev/null
+      echo "closed $2 ($tab)"
+    fi
     exit 0 ;;
   list:*)
     agents_json | jq -r --arg ws "$HERDR_WORKSPACE_ID" --arg me "${HERDR_PANE_ID:-}" '

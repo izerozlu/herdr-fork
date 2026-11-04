@@ -73,7 +73,7 @@ herdr-fork close <name>
 - `-C` opens the fork in a folder inside this one, for example a git worktree in `.worktrees/<name>`. A folder outside this one is refused.
 - The fork writes its report to `/tmp/herd/<name>.md`.
 - The name must be unique across all Herdr agents.
-- `herdr-fork list` shows the other agents in this workspace. `herdr-fork close <name>` closes a fork's tab.
+- `herdr-fork list` shows the other agents in this workspace. `herdr-fork close <name>` closes a fork's tab. In the Herdr desktop app, `list` also shows the panes of `/fork` forks (also those in your own tab), named `⑂ <the /fork text>`, and `herdr-fork close <name or id>` closes only that pane.
 - Exit status: 0 ok, 1 Herdr error, 2 refused, 3 the fork waits at a startup prompt (for example "trust this folder?") and has not got its task yet.
 
 ## Tests
