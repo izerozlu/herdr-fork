@@ -51,6 +51,8 @@ To change where the fork opens, set the plugin's **Fork destination** option (`/
 | `tab` | New tab in the same workspace |
 | `workspace` | New workspace |
 
+In the desktop app, the fork's pane shows in the agent list with the fork's status (working, blocked, done), like a normal Claude pane. The pane only shows the background session, so the plugin reports that session's status to Herdr for it.
+
 When Herdr closes the fork's pane, the plugin stops the fork session. Set the **When the fork pane closes** option (or `HERDR_FORK_ON_CLOSE`) to change this:
 
 | Value | What happens when the pane closes |

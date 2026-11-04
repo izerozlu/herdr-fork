@@ -330,7 +330,7 @@ has "rule in app" "$(jq -r .hookSpecificOutput.additionalContext <<<"$out")" "he
 cat > "$tmp/claude-bin" <<'C'
 #!/usr/bin/env bash
 echo "$*" >> "$CLAUDE_LOG"
-if [ "$1" = attach ]; then [ -n "${ATTACH_EXIT:-}" ] && exit 0; sleep 1; fi
+if [ "$1" = attach ]; then [ -n "${ATTACH_EXIT:-}" ] && exit 0; sleep "${ATTACH_SLEEP:-1}"; fi
 exit 0
 C
 chmod +x "$tmp/claude-bin"
@@ -352,6 +352,23 @@ check "pane kill stops fork" "$(attach TERM)" "attach abcd1234;stop abcd1234;"
 check "remove stops and removes" "$(ONCLOSE=remove attach HUP)" "attach abcd1234;stop abcd1234;rm abcd1234;"
 check "keep leaves fork" "$(ONCLOSE=keep attach HUP)" "attach abcd1234;"
 check "leaving attach leaves fork" "$(ATTACH_EXIT=1 attach)" "attach abcd1234;"
+
+# In the desktop app, fork-attach reports the fork's status to Herdr (OSC 7501) from
+# the session's file: busy is working, waiting is blocked, idle after work is done.
+osc() { printf '\033]7501;state=%s:app=claude-code%s\033\\' "$1" "${2:-}"; }
+sess=$tmp/claude/sessions/999.json
+status_out() {  # status_out <status>...: each status in the session file for ~1s
+  printf '{"pid":999,"sessionId":"abcd1234-0000","kind":"bg","jobId":"abcd1234","status":"%s","waitingFor":"approve Bash"}' "$1" > "$sess"
+  (shift; for st in "$@"; do sleep 1.2; printf '{"pid":999,"jobId":"abcd1234","status":"%s","waitingFor":"approve Bash"}' "$st" > "$sess"; done) &
+  HC_TERMINAL_ID=t8 HERDR_FORK_CLAUDE=$tmp/claude-bin ATTACH_SLEEP=$(( $# + 1 )) "$root/scripts/fork-attach" abcd1234
+  wait
+}
+check "status idle at start" "$(status_out idle)" "$(osc idle)"
+check "status working then done" "$(status_out busy idle)" "$(osc working)$(osc done)"
+check "status shell is working" "$(status_out shell)" "$(osc working)"
+check "status blocked with reason" "$(status_out waiting)" "$(osc blocked ":msg=$(printf 'approve Bash' | base64)")"
+check "no status outside the app" "$(printf '{"jobId":"abcd1234","status":"busy"}' > "$sess"; HERDR_FORK_CLAUDE=$tmp/claude-bin "$root/scripts/fork-attach" abcd1234)" ""
+rm -f "$sess"
 
 if command -v claude >/dev/null; then
   out=$(claude plugin validate "$root" 2>&1); code=$?
