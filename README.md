@@ -51,6 +51,8 @@ To change where the fork opens, set the plugin's **Fork destination** option (`/
 | `tab` | New tab in the same workspace |
 | `workspace` | New workspace |
 
+In the desktop app, the fork's pane shows in the agent list with the fork's status (working, blocked, done), like a normal Claude pane. The pane only shows the background session, so the plugin reports that session's status to Herdr for it.
+
 When Herdr closes the fork's pane, the plugin stops the fork session. Set the **When the fork pane closes** option (or `HERDR_FORK_ON_CLOSE`) to change this:
 
 | Value | What happens when the pane closes |
@@ -73,7 +75,7 @@ herdr-fork close <name>
 - `-C` opens the fork in a folder inside this one, for example a git worktree in `.worktrees/<name>`. A folder outside this one is refused.
 - The fork writes its report to `/tmp/herd/<name>.md`.
 - The name must be unique across all Herdr agents.
-- `herdr-fork list` shows the other agents in this workspace. `herdr-fork close <name>` closes a fork's tab.
+- `herdr-fork list` shows the other agents in this workspace. `herdr-fork close <name>` closes a fork's tab. In the Herdr desktop app, `list` also shows the panes of `/fork` forks (also those in your own tab), named `⑂ <the /fork text>`, and `herdr-fork close <name or id>` closes only that pane.
 - Exit status: 0 ok, 1 Herdr error, 2 refused, 3 the fork waits at a startup prompt (for example "trust this folder?") and has not got its task yet.
 
 ## Tests
